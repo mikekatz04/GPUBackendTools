@@ -23,9 +23,7 @@ from typing import (
     Union,
 )
 
-from ..cutils import KNOWN_BACKENDS
 from . import exceptions
-
 
 class ConfigSource(enum.Enum):
     """Enumeration of config option sources."""

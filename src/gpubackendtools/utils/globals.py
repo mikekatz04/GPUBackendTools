@@ -7,7 +7,7 @@ import logging.handlers
 import os
 import typing
 
-from ..cutils import Backend, BackendsManager
+from ..gpubackendtools import Backend, BackendsManager
 from .config import (
     ConfigConsumer,
     ConfigEntry,
@@ -373,6 +373,14 @@ def get_config() -> Configuration:
     """Get GPUBACKENDTOOLS configuration"""
     return Globals().config
 
+def add_backends(available_backends: typing.Dict[str, Backend]):
+    """
+    Add a backend to the singleton instance. 
+
+    """
+    Globals().add_backends(available_backends=available_backends)
+
+
 
 def get_backend(backend_name: str) -> Backend:
     """
@@ -381,10 +389,13 @@ def get_backend(backend_name: str) -> Backend:
     If the backend name is "cuda", return a CUDA backend if any available.
     If the backend name is "gpu", return a GPU backend if any available.
     """
-    if backend_name == "cuda":
-        return get_first_backend(["cuda12x", "cuda11x"])
-    if backend_name == "gpu":
-        return get_backend("cuda")
+    if "cuda" in backend_name.split("_"):
+        _base = backend_name.split("_")[0]
+        return get_first_backend([_base + "_cuda12x", _base + "_cuda11x"])
+    if "gpu" in backend_name.split("_"):
+        _base = backend_name.split("_")[0]
+        return get_backend(_base + "cuda")
+
     return Globals().backends_manager.get_backend(backend_name=backend_name)
 
 
@@ -428,6 +439,7 @@ def reset(quiet: bool = False):
 
 # Initialize the globals singleton when first importing this file
 Globals()
+
 
 __all__ = [
     "Globals",

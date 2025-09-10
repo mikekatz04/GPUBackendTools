@@ -1,5 +1,5 @@
-from .globals import get_backend, get_first_backend, get_logger
-from ..cutils import Backend
+from .utils.globals import get_backend, get_first_backend, get_logger
+from .gpubackendtools import Backend
 from typing import Optional, Sequence, TypeVar, Union
 import types
 
@@ -17,13 +17,23 @@ class ParallelModuleBase:  # (Citable):
     _backend_name: str
 
     def __init__(self, /, force_backend = None):
-        if force_backend is not None:
-            if isinstance(force_backend, Backend):
-                force_backend = force_backend.name
-            self._backend_name = get_backend(force_backend).name
-        else:
+        if force_backend is None:
             self._backend_name = get_first_backend(self.supported_backends()).name
 
+        elif isinstance(force_backend, str):
+            self._backend_name = get_backend(force_backend).name
+        elif isinstance(force_backend, Backend):
+            force_backend = force_backend.name
+            self._backend_name = get_backend(force_backend).name
+        elif isinstance(force_backend, tuple) or isinstance(force_backend, list):
+            # comes in the form of (module, backend)
+            assert isinstance(force_backend[0], str) and isinstance(force_backend[1], str)
+            force_backend = force_backend[0] + "_" + force_backend[1]
+            self._backend_name = get_backend(force_backend).name
+            
+        else:
+            raise ValueError("FIX THIS")
+        
     @property
     def backend(self) -> Backend:
         """Access the underlying backend."""

@@ -30,11 +30,11 @@ sys.path.insert(0, os.path.abspath("../../"))
 
 import shutil
 
-
-shutil.copy(
-    "../../examples/GPUBackendTools_tutorial.ipynb",
-    "GPUBackendTools_tutorial.ipynb",
-)
+# TODO: do we need a tutorial
+# shutil.copy(
+#     "../../examples/Backend.ipynb",
+#     "GPUBackendTools_tutorial.ipynb",
+# )
 
 
 # -- General configuration ---------------------------------------------------

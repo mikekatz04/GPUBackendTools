@@ -2,7 +2,6 @@
 requires = [
   "Cython",
   "numpy",
-  "lisaanalysistools>=1.0.17",
   "scikit_build_core",
 ]
 build-backend = "scikit_build_core.build"

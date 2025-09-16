@@ -36,6 +36,7 @@ from .globals import (
     # get_file_manager,
     get_logger,
     has_backend,
+    Globals
 )
 
 from .pointeradjust import wrapper, pointer_adjust
@@ -62,4 +63,5 @@ __all__ = [
     "ParallelModuleBase",
     "wrapper", 
     "pointer_adjust",
+    "Globals",
 ]

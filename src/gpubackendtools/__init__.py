@@ -31,10 +31,7 @@ except (ModuleNotFoundError, ImportError):
 from . import cutils, utils
 from .globals import (
     get_backend,
-    get_config,
-    get_config_setter,
-    # get_file_manager,
-    get_logger,
+    get_first_backend,
     has_backend,
     Globals
 )
@@ -58,6 +55,7 @@ __all__ = [
     "get_config",
     "get_config_setter",
     "get_backend",
+    "get_first_backend",
     "get_file_manager",
     "has_backend",
     "ParallelModuleBase",

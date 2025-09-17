@@ -206,20 +206,10 @@ jobs:
       id-token: write
     steps:
       - name: Retrieve release distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
+          name: release-dists
           path: dist/
-          merge-multiple: true
-      - name: List wheels
-        run: |
-          ls -al dist/*
-      - name: Install twine from PyPI
-        uses: install-pinned/twine@c7ca21f7f66fc895b73cba784dc1d0e302e3b4a3 # 6.1.0
-      - name: Publish release distributions to registry
-        env:
-          TWINE_NON_INTERACTIVE: "yes"
-          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
-          TWINE_REPOSITORY: ${{ vars.TWINE_REPOSITORY }}
-          TWINE_USERNAME: ${{ vars.TWINE_USERNAME }}
-        run: |
-          twine upload dist/*
+
+      - name: Publish release distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@6f7e8d9c0b1a2c3d4e5f6a7b8c9d0e1f2a3b4c5d

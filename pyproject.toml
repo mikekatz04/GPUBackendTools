@@ -2,9 +2,9 @@
 requires = [
   "Cython",
   "numpy",
-  "scikit_build_core",
+  "setuptools >= 77.0.3",
 ]
-build-backend = "scikit_build_core.build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "gpubackendtools" #@NAMESUFFIX@

@@ -82,7 +82,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-24.04-arm, ubuntu-latest, macos-13] # , ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-13, macos-latest]
+        os: [macos-latest, ubuntu-24.04-arm, macos-13] # , ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-13, macos-latest]
 
     steps:
       # =========================

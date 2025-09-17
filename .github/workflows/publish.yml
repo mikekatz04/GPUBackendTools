@@ -85,6 +85,14 @@ jobs:
         os: [ubuntu-latest] # , ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-13, macos-latest]
 
     steps:
+      # =========================
+      # = I - Retrieve sources  =
+      # =========================
+      - uses: actions/checkout@v4
+      # ========================
+      # = II - Update sources  =
+      # ========================
+      
       - name: Build core wheels (macOS)
         # if: runner.os == 'macOS' && matrix.kind == 'core'
         uses: pypa/cibuildwheel@v2.22.0

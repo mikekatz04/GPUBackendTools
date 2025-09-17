@@ -39,7 +39,6 @@ dependencies = [
 
 
 classifiers = [
-  "Environment :: GPU :: NVIDIA CUDA",
   "License :: OSI Approved :: Apache Software License",
   "Natural Language :: English",
   "Programming Language :: C++",

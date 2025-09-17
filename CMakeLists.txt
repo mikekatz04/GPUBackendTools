@@ -10,8 +10,8 @@
 cmake_minimum_required(VERSION 3.23...3.31)
 
 # ---- Main project definition ----
-project(gpubackendtools VERSION ${VERSION})
-message(STATUS "The value of VERSION is: ${VERSION}, ${SKBUILD_PROJECT_VERSION}")
+project(gpubackendtools VERSION ${SKBUILD_PROJECT_VERSION})
+message(STATUS "The value of SKBUILD_PROJECT_VERSION is: ${SKBUILD_PROJECT_VERSION}")
 
 # ---- Find required dependencies ----
 find_package(Python COMPONENTS Interpreter Development.Module NumPy REQUIRED)

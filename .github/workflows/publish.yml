@@ -75,7 +75,7 @@ jobs:
           echo "value=${VERSION}" >> $GITHUB_OUTPUT
           echo "version: ${VERSION}" >> $GITHUB_STEP_SUMMARY
   build:
-      release-build:
+    release-build:
     runs-on: ubuntu-latest
 
     steps:

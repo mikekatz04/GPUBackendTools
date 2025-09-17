@@ -189,7 +189,7 @@ jobs:
       - name: Build cuda plugin wheels (Linux)
         if: runner.os == 'Linux' && matrix.kind == 'cuda_plugin' && matrix.arch == 'x86_64'
         uses: actions/setup-python@v5
-        inputs:
+        env:
           python-version: ${{ matrix.reqpython }}
   publish:
     runs-on: ubuntu-latest

@@ -1,5 +1,7 @@
-/*  This code was edited by Michael Katz. The information in this file is originally from the LAL library.
- *  The original copyright and license is shown below. Michael Katz has edited and added to
+/*  This code was edited by Michael Katz. The information in this file is
+ originally from the LAL library.
+ *  The original copyright and license is shown below. Michael Katz has edited
+ and added to
  *  the code for his purposes and removed dependencies on the LAL libraries.
  *  This code is distrbuted under the same GNU license it originally came with.
 
@@ -21,13 +23,14 @@
  *  MA  02111-1307  USA
  */
 
-
 #ifndef _GLOBAL_HEADER_
 #define _GLOBAL_HEADER_
 
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+
 #include <complex>
+
 #include "cuda_complex.hpp"
 
 #ifdef __CUDACC__
@@ -39,21 +42,21 @@
 #define CUDA_SHARED __shared__
 #define CUDA_SYNCTHREADS __syncthreads();
 
-
 /*
 Function for gpu Error checking.
 //*/
-#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
-inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
-{
-   if (code != cudaSuccess)
-   {
-      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-      if (abort) exit(code);
-   }
+#define gpuErrchk(ans)                    \
+  {                                       \
+    gpuAssert((ans), __FILE__, __LINE__); \
+  }
+inline void gpuAssert(cudaError_t code, const char* file, int line,
+                      bool abort = true) {
+  if (code != cudaSuccess) {
+    fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file,
+            line);
+    if (abort) exit(code);
+  }
 }
-
-
 
 #else
 #define CUDA_CALLABLE_MEMBER
@@ -68,6 +71,5 @@ typedef gcmplx::complex<double> cmplx;
 #define invsqrt2 0.7071067811865475
 #define invsqrt3 0.5773502691896258
 #define invsqrt6 0.4082482904638631
-
 
 #endif

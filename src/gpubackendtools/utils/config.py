@@ -25,6 +25,7 @@ from typing import (
 
 from .. import exceptions
 
+
 class ConfigSource(enum.Enum):
     """Enumeration of config option sources."""
 
@@ -554,8 +555,6 @@ class Configuration(ConfigConsumer):
 
     @staticmethod
     def config_entries() -> List[ConfigEntry]:
-        from gpubackendtools import _is_editable as is_editable_mode
-
         return [
             ConfigEntry(
                 label="log_level",

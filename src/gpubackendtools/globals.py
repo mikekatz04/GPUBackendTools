@@ -19,6 +19,7 @@ from .exceptions import GPUBACKENDTOOLSException
 
 from .gpubackendtools import BackendsManager
 
+
 class Singleton(type):
     _instances = {}
 
@@ -158,7 +159,9 @@ class Globals(metaclass=Singleton):
     ):
         """Initialize config, file manager and logger with optional CLI arguments."""
         if not super().__getattribute__("_to_initialize"):
-            raise GPUBACKENDTOOLSGlobalsInitializedTwice("GPUBACKENDTOOLS globals are already initialized.")
+            raise GPUBACKENDTOOLSGlobalsInitializedTwice(
+                "GPUBACKENDTOOLS globals are already initialized."
+            )
         if set_args is None:
             config_setter = self.get_configuration_setter()
             set_args = config_setter.get_args()
@@ -232,7 +235,9 @@ class Globals(metaclass=Singleton):
         return super().__getattribute__("_config_setter")
 
     def __setattr__(self, name, value):
-        raise GPUBACKENDTOOLSGlobalsReadOnly("Cannot set attribute on Globals structure.")
+        raise GPUBACKENDTOOLSGlobalsReadOnly(
+            "Cannot set attribute on Globals structure."
+        )
 
     def _preinit_logger(self):
         """Pre-initialize logger."""
@@ -373,13 +378,13 @@ def get_config() -> Configuration:
     """Get GPUBACKENDTOOLS configuration"""
     return Globals().config
 
+
 def add_backends(available_backends: typing.Dict[str, Backend]):
     """
-    Add a backend to the singleton instance. 
+    Add a backend to the singleton instance.
 
     """
     Globals().add_backends(available_backends=available_backends)
-
 
 
 def get_backend(backend_name: str) -> Backend:

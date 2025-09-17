@@ -1,4 +1,4 @@
-GPU Backend Tools Base Setup 
+GPU Backend Tools Base Setup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Backends
@@ -49,4 +49,3 @@ Exceptions
 .. autoclass:: lisatools.utils.exceptions.MissingDependency
     :members:
     :show-inheritance:
-

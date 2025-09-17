@@ -22,13 +22,11 @@ copyright = "2025, Michael L. Katz, Maxime Pigou, Mathieu Dubois"
 author = "Michael L. Katz, Maxime Pigou, Mathieu Dubois"
 
 
-import pypandoc
-
-import sys, os
+import sys
+import os
 
 sys.path.insert(0, os.path.abspath("../../"))
 
-import shutil
 
 # TODO: do we need a tutorial
 # shutil.copy(
@@ -67,7 +65,6 @@ templates_path = ["_templates"]
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
-import sphinx_rtd_theme
 
 autodoc_member_order = "bysource"
 

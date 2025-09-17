@@ -92,7 +92,7 @@ jobs:
       # ========================
       # = II - Update sources  =
       # ========================
-      
+
        # Used to host cibuildwheel
       - uses: actions/setup-python@v5
 
@@ -101,7 +101,7 @@ jobs:
 
       - name: Build wheels
         run: python -m build --outdir wheelhouse
-        
+
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}

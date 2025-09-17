@@ -1,5 +1,3 @@
-
-
 cornish_fastb = """
 @article{Cornish:2007if,
     author = "Cornish, Neil J. and Littenberg, Tyson B.",

@@ -272,7 +272,9 @@ def build_citation_registry() -> CitationRegistry:
     from gpubackendtools import _is_editable as is_editable
 
     gpubackendtools_root = pathlib.Path(_gpubackendtools_root_file).parent
-    cff_root = gpubackendtools_root.parent.parent if is_editable else gpubackendtools_root
+    cff_root = (
+        gpubackendtools_root.parent.parent if is_editable else gpubackendtools_root
+    )
     citation_cff_path = cff_root / "CITATION.cff"
 
     with open(citation_cff_path, "rt") as fid:

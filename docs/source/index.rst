@@ -7,7 +7,7 @@
 
    user/gpubackendtools
    user/parallelmodulebase
-   
+
 .. toctree::
    :maxdepth: 4
    :caption: Tutorial:

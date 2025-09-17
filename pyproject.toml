@@ -8,9 +8,9 @@ requires = [
 [project]
 name = "gpubackendtools" #@NAMESUFFIX@
 
-version = "0.0.11"
+version = "0.0.12"
 
-description = "GPU/CPU Galactic Binary Waveforms"
+description = "GPU Backend Tools"
 
 readme = "README.md"
 

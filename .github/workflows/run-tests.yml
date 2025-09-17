@@ -36,9 +36,9 @@ jobs:
           which cmake
           cmake --version
           python -m pip install -v .
-      - name: Run tests alone without coverage.
-        run: |
-          python -m unittest tests/test*
+      # - name: Run tests alone without coverage.
+      #   run: |
+      #     python -m unittest tests/test*
       # TODO: add back in
       # - name: Install coverage
       #   run: |

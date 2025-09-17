@@ -1,5 +1,5 @@
 # Add subdirectories which contain compiled sources
-add_subdirectory(cutils)
+# add_subdirectory(cutils)
 
 # Handle Git Metadata
 get_target_property(_GPUBACKENDTOOLS_WITH_CPU gpubackendtools WITH_CPU)

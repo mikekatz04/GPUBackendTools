@@ -78,11 +78,11 @@ jobs:
     needs:
       - version
       - select
-    name: Build wheels on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest] # , ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-13, macos-latest]
+    name: Build wheels. # on ${{ matrix.os }}
+    # runs-on: ${{ matrix.os }}
+    # strategy:
+    #   matrix:
+    #     os: [ubuntu-latest] # , ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-13, macos-latest]
 
     steps:
       # =========================
@@ -110,7 +110,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          name: cibw-wheels-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
   publish:
     runs-on: ubuntu-latest

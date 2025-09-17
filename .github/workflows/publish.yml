@@ -95,7 +95,7 @@ jobs:
       
       - name: Build core wheels (macOS)
         # if: runner.os == 'macOS' && matrix.kind == 'core'
-        uses: pypa/cibuildwheel@v2.22.0
+        uses: pypa/build
         env:
           # CIBW_SKIP: pp*
           # CIBW_PROJECT_REQUIRES_PYTHON: ${{ matrix.reqpython }}

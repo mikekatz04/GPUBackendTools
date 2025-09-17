@@ -1,4 +1,4 @@
-from .utils.globals import get_backend, get_first_backend, get_logger
+from .globals import get_backend, get_first_backend, get_logger
 from .gpubackendtools import Backend
 from typing import Optional, Sequence, TypeVar, Union
 import types

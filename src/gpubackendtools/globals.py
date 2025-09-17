@@ -7,8 +7,7 @@ import logging.handlers
 import os
 import typing
 
-from ..gpubackendtools import Backend, BackendsManager
-from .config import (
+from .utils.config import (
     ConfigConsumer,
     ConfigEntry,
     ConfigSource,
@@ -18,6 +17,7 @@ from .config import (
 )
 from .exceptions import GPUBACKENDTOOLSException
 
+from .gpubackendtools import BackendsManager
 
 class Singleton(type):
     _instances = {}

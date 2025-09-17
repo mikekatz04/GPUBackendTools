@@ -5,7 +5,7 @@ import types
 import typing
 import abc
 from typing import Optional, Sequence, TypeVar, Union
-from .utils.exceptions import GPUBACKENDTOOLSException
+from .exceptions import GPUBACKENDTOOLSException
 
 
 class BackendUnavailableException(GPUBACKENDTOOLSException):

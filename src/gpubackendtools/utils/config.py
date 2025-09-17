@@ -23,7 +23,7 @@ from typing import (
     Union,
 )
 
-from . import exceptions
+from .. import exceptions
 
 class ConfigSource(enum.Enum):
     """Enumeration of config option sources."""
@@ -733,7 +733,7 @@ class Configuration(ConfigConsumer):
         parser = self._build_verbosity_parser()
         parsed_options, self._extra_cli = parser.parse_known_args(self._extra_cli)
 
-        from .globals import get_logger
+        from ..globals import get_logger
 
         if parsed_options.quiet:
             get_logger().debug(
@@ -781,7 +781,7 @@ def detect_cfg_file() -> Optional[pathlib.Path]:
         / "v{}.{}".format(__version_tuple__[0], __version_tuple__[1])
         / "gpubackendtools.ini",
     ]
-    from .globals import get_logger
+    from ..globals import get_logger
 
     for location in LOCATIONS:
         if location.is_file():

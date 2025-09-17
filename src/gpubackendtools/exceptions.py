@@ -12,6 +12,17 @@ class GPUBACKENDTOOLSException(Exception):
     pass
 
 
+class BackendUnavailableException(GPUBACKENDTOOLSException):
+    """Exception raised when the backend is not available."""
+
+    pass
+
+
+class BackendNotInstalled(BackendUnavailableException):
+    """Exception raised when the backend has not been installed"""
+    pass
+
+
 class CudaException(GPUBACKENDTOOLSException):
     """Base class for CUDA-related exceptions."""
 

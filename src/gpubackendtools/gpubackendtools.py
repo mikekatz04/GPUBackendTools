@@ -4,7 +4,6 @@ import enum
 import types
 import typing
 import abc
-from typing import Optional, Sequence, TypeVar, Union
 from .exceptions import GPUBACKENDTOOLSException
 
 
@@ -132,28 +131,30 @@ class Backend:
     def uses_cuda(self) -> bool:
         """Shortcut to check whether a backend uses CUDA devices"""
         return self.supports(feature=Backend.Feature.CUDA)
-    
+
     @property
     def name(self) -> str:
         if not hasattr(self, "_name"):
             raise ValueError("Child class must have _name attribute set.")
-        return self._name 
-    
+        return self._name
+
     @property
     def backend_name(self) -> str:
         if not hasattr(self, "_backend_name"):
             raise ValueError("Child class must have _backend_name attribute set.")
         return self._backend_name
-    
+
+
 class GPUBACKENDTOOLSBackend:
     get_ll: typing.Callable[(...), None]
     fill_global: typing.Callable[(...), None]
 
     def __init__(self, gpubackendtools_backend_methods):
-
         # set direct gpubackendtools methods
         # pass rest to general backend
-        assert isinstance(gpubackendtools_backend_methods, GPUBACKENDTOOLSBackendMethods)
+        assert isinstance(
+            gpubackendtools_backend_methods, GPUBACKENDTOOLSBackendMethods
+        )
 
         self.get_ll = gpubackendtools_backend_methods.get_ll
         self.fill_global = gpubackendtools_backend_methods.fill_global
@@ -166,7 +167,7 @@ class CpuBackend(Backend, abc.ABC):
     @abc.abstractmethod
     def cpu_methods_loader() -> BackendMethods:
         raise not NotImplementedError
-    
+
     @staticmethod
     def check_numpy() -> typing.ModuleType:
         try:
@@ -175,14 +176,14 @@ class CpuBackend(Backend, abc.ABC):
             raise MissingDependencies(
                 "'cpu' backend requires numpy", pip_deps=["numpy"], conda_deps=["numpy"]
             ) from e
-        
+
         return numpy
 
     def __init__(self):
         """Initialize the CPU backend"""
         if self.backend_name is None:
             raise ValueError("Child class must declare `backend_name` class attribute.")
-        
+
         self._check_module_installed(self.name, self.backend_name)
 
         Backend.__init__(
@@ -459,10 +460,10 @@ class Cuda11xBackend(_CudaBackend, abc.ABC):
 
     def __init__(self):
         """Initialize the CPU backend"""
-        
+
         if self.backend_name is None:
             raise ValueError("Child class must declare `backend_name` class attribute.")
-        
+
         name = "cuda11x"
         methods = self.check_cuda_backend(
             name=name,
@@ -537,10 +538,10 @@ class Cuda12xBackend(_CudaBackend, abc.ABC):
 
     def __init__(self):
         """Initialize the CPU backend"""
-        
+
         if self.backend_name is None:
             raise ValueError("Child class must declare `backend_name` class attribute.")
-        
+
         name = "cuda12x"
         methods = self.check_cuda_backend(
             name=name,
@@ -609,7 +610,9 @@ class BackendsManager:
         """
         self._registry = {}
 
-    def _initialize_backend(self, enabled_backends: typing.Optional[typing.Sequence[str]] = None):
+    def _initialize_backend(
+        self, enabled_backends: typing.Optional[typing.Sequence[str]] = None
+    ):
         """
         # TODO: how do we handle this as we go to other packages.
         Initialize the backend registry.
@@ -657,7 +660,9 @@ class BackendsManager:
             return current_status
 
         try:
-            new_status = BackendStatusLoaded(instance=self._known_backends[backend_name]())
+            new_status = BackendStatusLoaded(
+                instance=self._known_backends[backend_name]()
+            )
         except BackendUnavailableException as e:
             new_status = BackendStatusUnavailable(reason=e)
 
@@ -707,7 +712,7 @@ class BackendsManager:
                     backend_name = name
                     run_through = False
                 registry_ind += 1
-                
+
             for name in self._registry.keys():
                 if name.split("_")[-1] == backend_name:
                     backend_name = name
@@ -744,11 +749,11 @@ class BackendsManager:
             self.add_backend(key, value)
         # TODO: configuration added here?
         self._initialize_backend()
-    
+
 
 @dataclasses.dataclass
 class GpuBackendToolConsumer:
-    name : str = None
+    name: str = None
     compiled_backends: typing.Dict[str, Backend] = None
 
 

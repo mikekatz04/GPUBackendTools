@@ -54,4 +54,3 @@ set(
 
 # ---- Phony target for project specific properties ----
 add_library(gpubackendtools INTERFACE)
-

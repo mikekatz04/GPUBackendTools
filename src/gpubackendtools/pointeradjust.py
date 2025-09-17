@@ -6,7 +6,7 @@ try:
 
     gpu = True
 
-except (ImportError, ModuleNotFoundError) as e:
+except (ImportError, ModuleNotFoundError):
     import numpy as np
 
     gpu = False

@@ -29,12 +29,7 @@ except (ModuleNotFoundError, ImportError):
     _is_editable = False
 
 from . import cutils, utils
-from .globals import (
-    get_backend,
-    get_first_backend,
-    has_backend,
-    Globals
-)
+from .globals import get_backend, get_first_backend, has_backend, Globals
 
 from .pointeradjust import wrapper, pointer_adjust
 
@@ -59,7 +54,7 @@ __all__ = [
     "get_file_manager",
     "has_backend",
     "ParallelModuleBase",
-    "wrapper", 
+    "wrapper",
     "pointer_adjust",
     "Globals",
 ]

@@ -82,7 +82,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
-
+      - name: Add core project dependency on plugin
+        run: |
+          sed -i'' -e 's|#@DEPS_GBGPUCORE@|"gbgpu==${{ needs.version.outputs.version }}"|g' pyproject.toml
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"

@@ -20,6 +20,11 @@ jobs:
         if: contains(github.event.head_commit.message, '[ci:build-wheels]')
         run: |
           echo "GPUBACKENDTOOLSWHL_BUILD=true" >> "$GITHUB_ENV"
+      - name: publish on commit message
+        if: contains(github.event.head_commit.message, '[ci:publish-wheels]')
+        run: |
+          echo "GPUBACKENDTOOLSWHL_BUILD=true" >> "$GITHUB_ENV"
+          echo "GPUBACKENDTOOLSWHL_PUBLISH=true" >> "$GITHUB_ENV"
       - name: build and publish on tag 'v*'
         if: startsWith(github.event.ref, 'refs/tags/v')
         run: |
@@ -205,11 +210,11 @@ jobs:
       # IMPORTANT: this permission is mandatory for trusted publishing
       id-token: write
     steps:
-      # - name: Retrieve release distributions
-      #   uses: actions/download-artifact@v5
-      #   with:
-      #     name: release-dists
-      #     path: dist/
+      - name: Retrieve release distributions
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
 
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

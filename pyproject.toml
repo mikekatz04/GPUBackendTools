@@ -71,8 +71,8 @@ optional-dependencies.testing = [
 ]
 
 [tool.setuptools_scm]
-version_scheme = "no-guess-dev"
-local_scheme = "node-and-date"
+version_scheme = "only-version"
+local_scheme = "no-local-version"
 write_to = "src/gpubackendtools/_version.py"
 #@FALLBACK_VERSION@
 

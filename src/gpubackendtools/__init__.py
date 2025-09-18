@@ -1,4 +1,4 @@
-"""Fast and accurate EMRI Waveforms."""
+"""GPU Backend Tools."""
 
 # ruff: noqa: E402
 try:

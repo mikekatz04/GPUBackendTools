@@ -12,27 +12,27 @@ jobs:
     steps:
       - name: initialize
         run: |
-          echo "GPUTOOLSWHL_BUILD=false" >> "$GITHUB_ENV"
-          echo "GPUTOOLSWHL_PUBLISH=false" >> "$GITHUB_ENV"
+          echo "GPUBACKENDTOOLSWHL_BUILD=false" >> "$GITHUB_ENV"
+          echo "GPUBACKENDTOOLSWHL_PUBLISH=false" >> "$GITHUB_ENV"
       - name: build on commit message
         if: contains(github.event.head_commit.message, '[ci:build-wheels]')
         run: |
-          echo "GPUTOOLSWHL_BUILD=true" >> "$GITHUB_ENV"
+          echo "GPUBACKENDTOOLSWHL_BUILD=true" >> "$GITHUB_ENV"
       - name: publish on commit message
         if: contains(github.event.head_commit.message, '[ci:publish-wheels]')
         run: |
-          echo "GPUTOOLSWHL_BUILD=true" >> "$GITHUB_ENV"
-          echo "GPUTOOLSWHL_PUBLISH=true" >> "$GITHUB_ENV"
+          echo "GPUBACKENDTOOLSWHL_BUILD=true" >> "$GITHUB_ENV"
+          echo "GPUBACKENDTOOLSWHL_PUBLISH=true" >> "$GITHUB_ENV"
       - name: build and publish on tag 'v*'
         if: startsWith(github.event.ref, 'refs/tags/v')
         run: |
-          echo "GPUTOOLSWHL_BUILD=true" >> "$GITHUB_ENV"
-          echo "GPUTOOLSWHL_PUBLISH=true" >> "$GITHUB_ENV"
+          echo "GPUBACKENDTOOLSWHL_BUILD=true" >> "$GITHUB_ENV"
+          echo "GPUBACKENDTOOLSWHL_PUBLISH=true" >> "$GITHUB_ENV"
       - name: output results
         id: select
         run: |
-          echo "build=$GPUTOOLSWHL_BUILD" >> $GITHUB_OUTPUT
-          echo "publish=$GPUTOOLSWHL_PUBLISH" >> $GITHUB_OUTPUT
+          echo "build=$GPUBACKENDTOOLSWHL_BUILD" >> $GITHUB_OUTPUT
+          echo "publish=$GPUBACKENDTOOLSWHL_PUBLISH" >> $GITHUB_OUTPUT
   build:
     needs:
       - select

@@ -30,4 +30,4 @@ Current Version: 0.0.1
 
 ## License
 
-This project is licensed under the Apache License - see the [LICENSE](https://github.com/mikekatz04GPUBackendTools/blob/master/LICENSE) file for details.
+This project is licensed under the Apache License - see the [LICENSE](https://github.com/mikekatz04/GPUBackendTools/blob/master/LICENSE) file for details.

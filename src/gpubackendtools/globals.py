@@ -399,7 +399,7 @@ def get_backend(backend_name: str) -> Backend:
         return get_first_backend([_base + "_cuda12x", _base + "_cuda11x"])
     if "gpu" in backend_name.split("_"):
         _base = backend_name.split("_")[0]
-        return get_backend(_base + "cuda")
+        return get_backend(_base + "_cuda")
 
     return Globals().backends_manager.get_backend(backend_name=backend_name)
 

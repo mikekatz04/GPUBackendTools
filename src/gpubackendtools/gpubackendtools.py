@@ -143,6 +143,13 @@ class Backend:
         if not hasattr(self, "_backend_name"):
             raise ValueError("Child class must have _backend_name attribute set.")
         return self._backend_name
+    
+    @property
+    def backend_base(self) -> str:
+        if "_" in self.name:
+            return self.name.split("_")[-1]
+        else:
+            return self.name
 
 
 class GPUBACKENDTOOLSBackend:
@@ -283,7 +290,7 @@ class _CudaBackend(Backend):
         import importlib
         import pathlib
 
-        from ..utils.exceptions import ExceptionGroup
+        from .exceptions import ExceptionGroup
 
         try:
             nvidia_root = pathlib.Path(
@@ -731,7 +738,7 @@ class BackendsManager:
                     )
                 )
 
-        from ..utils.exceptions import ExceptionGroup
+        from .exceptions import ExceptionGroup
 
         raise BackendAccessException(
             "Could not access any of the following backends which are either disabled or unavailable: {}".format(

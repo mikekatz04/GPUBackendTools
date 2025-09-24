@@ -8,7 +8,7 @@ requires = [
 [project]
 name = "gpubackendtools" #@NAMESUFFIX@
 
-version = "0.0.13"
+version = "0.0.14"
 
 description = "GPU Backend Tools"
 

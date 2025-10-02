@@ -1,14 +1,11 @@
 [build-system]
-build-backend = "uv_build"
+build-backend = "scikit_build_core.build"
 
-requires = [
-  "uv-build>=0.8.17,<0.9",
-]
+requires = [ "cython", "numpy", "scikit-build-core"]
+
 
 [project]
 name = "gpubackendtools" #@NAMESUFFIX@
-
-version = "0.0.14"
 
 description = "GPU Backend Tools"
 
@@ -31,6 +28,10 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
 ]
+
+# version is deduced from the lattest git tag
+# description is the docstring at the top of src/gpubackendtools/__init__.py
+dynamic = [ "version" ]
 
 dependencies = [
   "exceptiongroup; python_version<'3.11'", # To access ExceptionGroup with Python 3.9 and 3.10
@@ -82,3 +83,73 @@ report.omit = [
   "*/gpubackendtools/git_version.py",
   "*/gpubackendtools_backend_*/git_version.py",
 ]
+
+[tool.setuptools_scm]
+version_scheme = "no-guess-dev"
+local_scheme = "node-and-date"
+version_file = "src/gpubackendtools/_version.py"
+#@FALLBACK_VERSION@
+
+
+[tool.scikit-build]
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
+sdist.include = [
+  "src/gpubackendtools/_version.py",
+  "src/gpubackendtools/git_version.py",                 #@SKIP_PLUGIN@
+  "src/gpubackendtools_backend_cuda11x/git_version.py",
+  "src/gpubackendtools_backend_cuda12x/git_version.py",
+  "tests/",
+]
+sdist.exclude = [
+  ".devcontainer/",
+  ".github/",
+  "dataset-preprocessing/",
+  "docs/",
+  "examples/",
+  ".cmake-format.yaml",
+  ".gitignore",
+  ".pre-commit-config.yaml",
+  "src/gpubackendtools/_editable.py",
+  "src/gpubackendtools/tests/base.py",
+  "src/gpubackendtools/git_version.py.in",
+]
+
+wheel.exclude = [
+  "**.pyx",
+  "**.cu",
+  "**.cxx",
+  "**.hh",
+  "**.h",
+  "**.hpp",
+  "**/CMakeLists.txt",
+  "lib/pkgconfig",
+  "lib/cmake",
+  "lib/*.so",
+  "lib/*.a",
+]
+
+[tool.scikit-build.wheel.packages]
+gpubackendtools = "src/gpubackendtools"       #@SKIP_PLUGIN@
+"gpubackendtools/tests" = "tests" #@SKIP_PLUGIN@
+
+[tool.ruff]
+
+extend-include = [
+  "!*.py",
+  # Enable Ruff on a white-list approach for now
+  "!src/gpubackendtools/files/manager.py",
+  "!src/gpubackendtools/files/registry.py",
+  "!src/gpubackendtools/utils/config.py",
+  "!src/gpubackendtools/utils/exceptions.py",
+  "!src/gpubackendtools/utils/globals.py",
+]
+
+lint.extend-select = [
+  "I",
+  "T201", # Fail when "print" is used, to be replaced with logger calls
+]
+
+lint.ignore = [ "E741" ]
+
+lint.extend-per-file-ignores."*.ipynb" = [ "T201" ] # Allow "print" statements in notebooks
+

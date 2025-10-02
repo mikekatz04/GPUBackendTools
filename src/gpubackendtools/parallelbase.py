@@ -107,3 +107,9 @@ class ParallelModuleBase:  # (Citable):
             kwargs = {}
         kwargs["force_backend"] = self.backend_name
         return kwargs
+
+
+class GBTParallelModuleBase(ParallelModuleBase):
+    def __init__(self, force_backend=None):
+        force_backend_in = 'gbt_' + force_backend if isinstance(force_backend, str) else force_backend
+        super().__init__(force_backend_in)

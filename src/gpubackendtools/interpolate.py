@@ -19,6 +19,8 @@
 import numpy as np
 
 from .parallelbase import GBTParallelModuleBase
+from .pointeradjust import wrapper
+
 
 def searchsorted2d_vec(a, b, xp=None, **kwargs):
     if xp is None:
@@ -36,6 +38,11 @@ def searchsorted2d_vec(a, b, xp=None, **kwargs):
         pass
 
     return out
+
+
+CUBIC_SPLINE_LINEAR_SPACING = 1
+CUBIC_SPLINE_LOG10_SPACING = 2
+CUBIC_SPLINE_GENERAL_SPACING = 3 
 
 
 class CubicSplineInterpolant(GBTParallelModuleBase):
@@ -79,6 +86,7 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         y_all,
         ninterps=None,
         length=None,
+        spline_type=CUBIC_SPLINE_GENERAL_SPACING,
         force_backend=None,
     ):
 
@@ -140,6 +148,14 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         self.y_flat = y_all
         self.x_flat = x.copy()
 
+        self.spline_type = spline_type
+
+        if spline_type == CUBIC_SPLINE_LINEAR_SPACING:
+            assert self.xp.all(self.xp.diff(self.x_interp_shape, axis=-1) == self.xp.diff(self.x_interp_shape, axis=-1)[:, 0][:, None])
+
+        elif spline_type == CUBIC_SPLINE_LOG10_SPACING:
+            assert self.xp.all(self.xp.diff(self.xp.log10(self.x_interp_shape), axis=-1) == self.xp.diff(self.xp.log10(self.x_interp_shape), axis=-1)[:, 0][:, None])
+
         # perform interpolation
         self.interpolate_arrays(
             self.x_flat,
@@ -151,6 +167,16 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
             self.length,
             self.ninterps,
         )
+
+    @property
+    def spline_type(self) -> int:
+        return self._spline_type
+    
+    @spline_type.setter
+    def spline_type(self, spline_type: int):
+        if spline_type not in [CUBIC_SPLINE_LINEAR_SPACING, CUBIC_SPLINE_LOG10_SPACING, CUBIC_SPLINE_GENERAL_SPACING]:
+            raise ValueError("spline_type must be one of CUBIC_SPLINE_LINEAR_SPACING, CUBIC_SPLINE_LOG10_SPACING, CUBIC_SPLINE_GENERAL_SPACING.")
+        self._spline_type = spline_type
 
     @property
     def xp(self) -> object:
@@ -220,8 +246,16 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
     def container(self):
         """Container for easy transit of interpolation information."""
         return [self.x_flat, self.y_flat, self.c1_flat, self.c2_flat, self.c3_flat]
+    
+    @property
+    def cpp_class(self):
+        _inputs, tkwargs = wrapper(self.x_flat, self.y_flat, self.c1_flat, self.c2_flat, self.c3_flat, self.ninterps, self.length, self.spline_type)
+        return self.backend.pyCubicSplineWrap(*_inputs)
 
-    def __call__(self, x_new, ind_interps = None):
+    def __call__(self, x_new, ind_interps = None, use_c_backend=False):
+        
+        if use_c_backend:
+            raise NotImplementedError
         
         input_shape = x_new.shape
         if ind_interps is None:

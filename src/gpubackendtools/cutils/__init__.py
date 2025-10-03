@@ -12,9 +12,11 @@ from ..exceptions import *
 @dataclasses.dataclass
 class GBTBackendMethods(BackendMethods):
     interpolate_wrap: typing.Callable[(...), None]
+    pyCubicSplineWrap: object
 
 class GBTBackend:
     interpolate_wrap: typing.Callable[(...), None]
+    pyCubicSplineWrap: object
 
     def __init__(self, gbt_backend_methods):
 
@@ -23,6 +25,7 @@ class GBTBackend:
         assert isinstance(gbt_backend_methods, GBTBackendMethods)
 
         self.interpolate_wrap = gbt_backend_methods.interpolate_wrap
+        self.pyCubicSplineWrap = gbt_backend_methods.pyCubicSplineWrap
 
 
 class GBTCpuBackend(CpuBackend, GBTBackend):
@@ -48,6 +51,7 @@ class GBTCpuBackend(CpuBackend, GBTBackend):
 
         return GBTBackendMethods(
             interpolate_wrap=gbt_backend_cpu.interp.interpolate_wrap,
+            pyCubicSplineWrap=gbt_backend_cpu.interp.pyCubicSplineWrap,
             xp=numpy,
         )
 
@@ -81,6 +85,7 @@ class GBTCuda11xBackend(Cuda11xBackend, GBTBackend):
 
         return GBTBackendMethods(
             interpolate_wrap=gbt_backend_cuda11x.interp.interpolate_wrap,
+            pyCubicSplineWrap=gbt_backend_cuda11x.interp.pyCubicSplineWrap,
             xp=cupy,
         )
 
@@ -112,6 +117,7 @@ class GBTCuda12xBackend(Cuda12xBackend, GBTBackend):
 
         return GBTBackendMethods(
             interpolate_wrap=gbt_backend_cuda12x.interp.interpolate_wrap,
+            pyCubicSplineWrap=gbt_backend_cuda12x.interp.pyCubicSplineWrap,
             xp=cupy,
         )
 

@@ -9,6 +9,7 @@
 
 #define NUM_THREADS_INTERPOLATE 256
 
+
 // See scipy CubicSpline implementation, it matches that
 CUDA_CALLABLE_MEMBER
 void prep_splines(int i, int length, int interp_i, int ninterps, double *b, double *ud, double *diag, double *ld, double *x, double *y)
@@ -334,3 +335,120 @@ void interpolate(double *x, double *propArrays,
                        ninterps, length);
 #endif
 }
+
+
+#define CUBIC_SPLINE_LINEAR_SPACING 1
+#define CUBIC_SPLINE_LOG10_SPACING 2
+#define CUBIC_SPLINE_GENERAL_SPACING 3 
+
+CUDA_CALLABLE_MEMBER
+int CubicSpline::get_window(double x_new, int spline_index)
+{
+    int window = 0;
+    // TODO: switch statement
+    if (spline_type == CUBIC_SPLINE_LINEAR_SPACING)
+    {
+        window = int(x_new / (x0[spline_index * length + 1] - x0[spline_index * length + 0]));
+    }
+    else if (spline_type == CUBIC_SPLINE_LOG10_SPACING)
+    {
+        window = int(log10(x_new) / (log10(x0[spline_index * length + 1]) - log10(x0[spline_index * length + 0])));  // does this slow it down?
+    }
+    else if (spline_type == CUBIC_SPLINE_GENERAL_SPACING)
+    {
+        window = binary_search(&x0[spline_index * length], 0, length, x_new);
+    }
+    else
+    {
+#ifdef __CUDACC__
+        printf("BAD cubic spline type.");
+#else
+        throw std::invalid_argument("BAD cubic spline type.");
+#endif // __CUDACC__
+    }
+
+    if ((window < 0) || (window >= length))
+    {
+#ifdef __CUDACC__
+        printf("Outside spline. Using edge value.");
+        if (window < 0) window = 0;
+        if (window >= length) window = length - 1;
+#else
+        std::string error_str = "Outside spline." + std::to_string(window) + " " + std::to_string(length) + " " + std::to_string(x_new) + " " + std::to_string(x0[length-1]); 
+        throw std::invalid_argument(error_str);
+#endif // __CUDACC__
+    }
+}
+
+CUDA_CALLABLE_MEMBER
+CubicSplineSegment CubicSpline::get_cublic_spline_segment(double x_new, int spline_index)
+{
+    int window = get_window(x_new, spline_index); 
+    int _index = spline_index * length + window; 
+    CubicSplineSegment segment(x0[_index], y0[_index], c1[_index], c2[_index], c3[_index], spline_type);
+    return segment;
+}
+
+
+CUDA_CALLABLE_MEMBER
+double CubicSpline::eval_single(double x_new, int spline_index)
+{
+    CubicSplineSegment segment = get_cublic_spline_segment(x_new, spline_index);
+    return segment.eval(x_new);
+}
+
+
+CUDA_CALLABLE_MEMBER
+void CubicSpline::eval(double *y_new, double *x_new, int *spline_index, int N)
+{
+
+    for (int i = 0; i < N; i += 1)
+    {
+        y_new[i] = eval_single(x_new[i], spline_index[i]);
+    }
+}
+
+CUDA_CALLABLE_MEMBER
+int CubicSpline::even_sampled_search(double *array, int nmin, int nmax, double x) {
+    // TODO: adjust this. At specialized gpu array searching. 
+    double dx = array[1] - array[0];
+    return (int)floor(x/dx);
+}
+
+// Recursive binary search function.
+// Return nearest smaller neighbor of x in array[nmin,nmax] is present,
+// otherwise -1
+CUDA_CALLABLE_MEMBER
+int CubicSpline::binary_search(double *array, int nmin, int nmax, double x)
+{
+    // catch if x exactly matches array[nmin]
+    if(x==array[nmin]) return nmin;
+    
+    int next;
+    if(nmax>nmin)
+    {
+        int mid = nmin + (nmax - nmin) / 2;
+        
+        //find next unique element of array
+        next = mid;
+        while(array[mid]==array[next]) next++;
+        
+        // If the element is present at the middle
+        // itself
+        if (x > array[mid] && x < array[next])
+            return mid;
+        
+        // the element is in the lower half
+        if (array[mid] >= x)
+            return binary_search(array, nmin, mid, x);
+        
+        // the element is in upper half
+        return binary_search(array, next, nmax, x);
+    }
+    
+    // We reach here when element is not
+    // present in array
+    return -1;
+}
+
+

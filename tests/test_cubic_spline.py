@@ -36,7 +36,6 @@ class CubicSplineTest(unittest.TestCase):
         spl_scipy = CubicSpline_scipy(x_in, y_in)
 
         our_spl = CubicSplineInterpolant(x_in[None, :], y_in[None, :], force_backend="cpu")
-
         x_new = np.random.uniform(x_in[0], x_in[-1], size=10000)
         scipy_check = spl_scipy(x_new)
 
@@ -81,3 +80,23 @@ class CubicSplineTest(unittest.TestCase):
 
         our_check = our_spl(x_new, ind_interps=ind_interps)
         self.assertTrue(np.allclose(our_check[0], scipy_check))
+
+    def test_cubic_spline_c_backend(self):
+        force_backend = "cpu" if not gpu_available else "gpu"
+        
+        N = 1000
+        _x = np.linspace(0.0, 1.0, N)
+        x_in = np.tile(_x, (2, 2, 1))
+        y_in = np.tile((_x ** 3 + _x ** 2 + _x ** 1 + _x), (2, 2, 1))
+        
+        spl_scipy = CubicSpline_scipy(x_in[0, 0], y_in[0, 0])
+
+        our_spl = CubicSplineInterpolant(x_in, y_in, force_backend="cpu")
+
+        cpp_class = our_spl.cpp_class
+        _x_new = np.random.uniform(_x[0], _x[-1], size=10000)
+        scipy_check = spl_scipy(_x_new)
+
+        _y_new = np.zeros_like(_x_new)
+        cpp_class.eval(_y_new, _x_new, np.zeros_like(_x_new, dtype=np.int32), len(_x_new))
+        self.assertTrue(np.allclose(_y_new, scipy_check))

@@ -361,9 +361,10 @@ int CubicSpline::get_window(double x_new, int spline_index)
     else
     {
 #ifdef __CUDACC__
-        printf("BAD cubic spline type.");
+        printf("BAD cubic spline type. (%d)\n", spline_type);
 #else
-        throw std::invalid_argument("BAD cubic spline type.");
+        std::string error_str = "BAD cubic spline type. (" + std::to_string(spline_type) + ")"; 
+        throw std::invalid_argument(error_str);
 #endif // __CUDACC__
     }
 

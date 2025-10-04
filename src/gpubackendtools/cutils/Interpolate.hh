@@ -77,6 +77,7 @@ public:
         ninterps = ninterps_;
         length = length_;
         spline_type = spline_type_;
+        // printf("spline_type: %d\n", spline_type);
     };
     CUDA_CALLABLE_MEMBER
     CUDA_CALLABLE_MEMBER

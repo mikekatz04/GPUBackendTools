@@ -119,9 +119,9 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
                 raise ValueError(
                     f"Length of the y_all array is not correct. It is supposed to be {length * ninterps}. It is currently {len(y_all)}."
                 )
-            self.reshape_shape = (self.ninterps, self.length)
             self.length = length
             self.ninterps = ninterps
+            self.reshape_shape = (self.ninterps, self.length)
 
         else:
             # assumes last dimension is length
@@ -151,10 +151,10 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         self.spline_type = spline_type
 
         if spline_type == CUBIC_SPLINE_LINEAR_SPACING:
-            assert self.xp.all(self.xp.diff(self.x_interp_shape, axis=-1) == self.xp.diff(self.x_interp_shape, axis=-1)[:, 0][:, None])
+            assert self.xp.allclose(self.xp.diff(self.x_interp_shape, axis=-1), self.xp.diff(self.x_interp_shape, axis=-1)[:, 0][:, None])
 
         elif spline_type == CUBIC_SPLINE_LOG10_SPACING:
-            assert self.xp.all(self.xp.diff(self.xp.log10(self.x_interp_shape), axis=-1) == self.xp.diff(self.xp.log10(self.x_interp_shape), axis=-1)[:, 0][:, None])
+            assert self.xp.allclose(self.xp.diff(self.xp.log10(self.x_interp_shape), axis=-1), self.xp.diff(self.xp.log10(self.x_interp_shape), axis=-1)[:, 0][:, None])
 
         # perform interpolation
         self.interpolate_arrays(
@@ -167,6 +167,9 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
             self.length,
             self.ninterps,
         )
+
+        _inputs, tkwargs = wrapper(self.x_flat, self.y_flat, self.c1_flat, self.c2_flat, self.c3_flat, self.ninterps, self.length, self.spline_type)
+        self._cpp_class = self.backend.pyCubicSplineWrap(*_inputs)
 
     @property
     def spline_type(self) -> int:
@@ -249,9 +252,8 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
     
     @property
     def cpp_class(self):
-        _inputs, tkwargs = wrapper(self.x_flat, self.y_flat, self.c1_flat, self.c2_flat, self.c3_flat, self.ninterps, self.length, self.spline_type)
-        return self.backend.pyCubicSplineWrap(*_inputs)
-
+        return self._cpp_class
+    
     def __call__(self, x_new, ind_interps = None, use_c_backend=False):
         
         if use_c_backend:

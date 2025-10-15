@@ -357,7 +357,21 @@ int CubicSpline::get_window(double x_new, int spline_index)
     else if (spline_type == CUBIC_SPLINE_GENERAL_SPACING)
     {
         window = binary_search(&x0[spline_index * length], 0, length, x_new);
-    }
+        // printf("INSIDE: %e %e %e %d %d %d\n", x_new, x0[spline_index * length], x0[spline_index * length + length - 1], window, length, spline_index);
+        // if (x0[spline_index * length + length - 1] == 0.0)
+        // {
+        //     printf("INSIDE2: %e %e %e %d %d %d\n", x_new, x0[spline_index * length], x0[spline_index * length + length - 1], window, length, spline_index);
+        
+        //     for (int j = 0; j < ninterps; j += 1)
+        //     {
+        //       for (int i = 0; i < length; i += 100)
+        //       {
+        //         printf("WHAT?: %d (%d) %d (%d) %.12e \n", j, ninterps, i, length, x0[j * length + i]);
+        //       }
+        //     }
+        //     return -2;
+        // }
+      }
     else
     {
 #ifdef __CUDACC__
@@ -379,12 +393,19 @@ int CubicSpline::get_window(double x_new, int spline_index)
         throw std::invalid_argument(error_str);
 #endif // __CUDACC__
     }
+    
+    return window;
 }
 
 CUDA_CALLABLE_MEMBER
 CubicSplineSegment CubicSpline::get_cublic_spline_segment(double x_new, int spline_index)
 {
     int window = get_window(x_new, spline_index); 
+    // if (window == -2)
+    // {
+    //   printf("OUTSIDE: %e %e %e %d %d %d\n", x_new, x0[spline_index * length], x0[spline_index * length + length - 1], window, length, spline_index);
+    //   throw std::invalid_argument("BAD.");
+    // }    
     int _index = spline_index * length + window; 
     CubicSplineSegment segment(x0[_index], y0[_index], c1[_index], c2[_index], c3[_index], spline_type);
     return segment;

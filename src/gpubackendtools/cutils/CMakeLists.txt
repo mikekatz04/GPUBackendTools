@@ -6,7 +6,7 @@
 # * * Helper functions to detect LAPACK * *
 # * * * * * * * * * * * * * * * * * * * * *
 
-# gbt_try_get_lapacke_with_cmake
+# gpubackendtools_try_get_lapacke_with_cmake
 # ------------------------------
 #
 # This method will try to locate LAPACKE using CMake find_package() mechanism.
@@ -21,7 +21,7 @@
 # * In case of failure:
 #
 #   * LAPACKE_WITH_CMAKE_SUCCESS to OFF
-function(gbt_try_get_lapacke_with_cmake)
+function(gpubackendtools_try_get_lapacke_with_cmake)
 
   message(CHECK_START "Trying with find_package()")
   find_package(LAPACKE)
@@ -36,7 +36,7 @@ function(gbt_try_get_lapacke_with_cmake)
   endif()
 endfunction()
 
-# gbt_try_get_lapacke_with_pkgconfig
+# gpubackendtools_try_get_lapacke_with_pkgconfig
 # ----------------------------------
 #
 # This method will try to locate LAPACKE using PkgConfig.
@@ -55,7 +55,7 @@ endfunction()
 #
 #     * "MISSING_PKGCONFIG" if PKGCONFIG is not available
 #     * "MISSING_LAPACKE" if lapacke.pc is not found
-function(gbt_try_get_lapacke_with_pkgconfig)
+function(gpubackendtools_try_get_lapacke_with_pkgconfig)
   message(CHECK_START "Trying with PkgConfig")
   find_package(PkgConfig)
   if(NOT PkgConfig_FOUND)
@@ -79,7 +79,7 @@ function(gbt_try_get_lapacke_with_pkgconfig)
   set(LAPACKE_WITH_PKGCONFIG_LIBS PkgConfig::lapacke PARENT_SCOPE)
 endfunction()
 
-# gbt_try_get_lapacke_with_cpm
+# gpubackendtools_try_get_lapacke_with_cpm
 # ----------------------------
 #
 # This method will use CPM (CMake Package Manager) to fetch LAPACK sources and
@@ -89,7 +89,7 @@ endfunction()
 #
 # * LAPACKE_WITH_CPM_SUCCESS to ON
 # * LAPACKE_WITH_CPM_LIBS to the link targets
-function(gbt_try_get_lapacke_with_cpm)
+function(gpubackendtools_try_get_lapacke_with_cpm)
   include(CPM)
   message(CHECK_START "Trying with automatic fetching of Reference LAPACK")
   enable_language(Fortran)
@@ -110,14 +110,14 @@ function(gbt_try_get_lapacke_with_cpm)
   message(CHECK_PASS "done")
 endfunction()
 
-# gbt_get_lapacke
+# gpubackendtools_get_lapacke
 # ---------------
 #
 # This method will try to make LAPACKE available using the following strategies:
 #
-# * PKGCONFIG: use the function "gbt_try_get_lapacke_with_pkgconfig"
-# * CMAKE: use the function "gbt_try_get_lapacke_with_cmake"
-# * FETCH: use the function "gbt_try_get_lapacke_with_cpm"
+# * PKGCONFIG: use the function "gpubackendtools_try_get_lapacke_with_pkgconfig"
+# * CMAKE: use the function "gpubackendtools_try_get_lapacke_with_cmake"
+# * FETCH: use the function "gpubackendtools_try_get_lapacke_with_cpm"
 #
 # The following rules are applied to select the attempted strategies:
 #
@@ -141,7 +141,7 @@ endfunction()
 # * GBT_LAPACKE_LIBS: list of libraries to link against to use LAPACKE
 # * GBT_LAPACKE_GET_SUCCESS: ON
 # * GBT_LAPACKE_GET_STRATEGY: strategy that succeeded (PKGCONFIG|CMAKE|FETCH )
-function(gbt_get_lapacke)
+function(gpubackendtools_get_lapacke)
   # cmake-lint: disable=R0912,R0915
   message(CHECK_START "Locating LAPACKE")
 
@@ -177,7 +177,7 @@ function(gbt_get_lapacke)
 
   # II. Apply the PkgConfig strategy if enabled
   if(pkgconfig_strategy_enabled)
-    gbt_try_get_lapacke_with_pkgconfig()
+    gpubackendtools_try_get_lapacke_with_pkgconfig()
     if(LAPACKE_WITH_PKGCONFIG_SUCCESS)
       set(GBT_LAPACKE_LIBS "${LAPACKE_WITH_PKGCONFIG_LIBS}" PARENT_SCOPE)
       set(GBT_LAPACKE_GET_SUCCESS ON PARENT_SCOPE)
@@ -189,7 +189,7 @@ function(gbt_get_lapacke)
 
   # III. Apply the CMake strategy if enabled
   if(cmake_strategy_enabled)
-    gbt_try_get_lapacke_with_cmake()
+    gpubackendtools_try_get_lapacke_with_cmake()
     if(LAPACKE_WITH_CMAKE_SUCCESS)
       set(GBT_LAPACKE_LIBS "${LAPACKE_WITH_CMAKE_LIBS}" PARENT_SCOPE)
       set(GBT_LAPACKE_GET_SUCCESS ON PARENT_SCOPE)
@@ -201,7 +201,7 @@ function(gbt_get_lapacke)
 
   # IV. Apply the Fetch strategy if enabled
   if(fetch_strategy_enabled)
-    gbt_try_get_lapacke_with_cpm()
+    gpubackendtools_try_get_lapacke_with_cpm()
     if(LAPACKE_WITH_CPM_SUCCESS)
       set(GBT_LAPACKE_LIBS "${LAPACKE_WITH_CPM_LIBS}" PARENT_SCOPE)
       set(GBT_LAPACKE_GET_SUCCESS ON PARENT_SCOPE)
@@ -405,11 +405,12 @@ if(GBT_WITH_CPU)
   # interp needs to link against LAPACKE. USe the following method to detect
   # it and obtain ${GBT_LAPACKE_LIBS}. In case of failure, it will stop the
   # processing execution.
-  gbt_get_lapacke()
+  enable_language(Fortran)
+  gpubackendtools_get_lapacke()
   # Now, link against ${GBT_LAPACKE_LIBS} to link against liblapacke.so and
   # include lapacke.h
   target_link_libraries(gbt_cpu_interp LINK_PUBLIC ${GBT_LAPACKE_LIBS}
-                        ${GBT_LAPACKE_EXTRA_LIBS})
+                        ${GBT_LAPACKE_EXTRA_LIBS} -lgfortran)
 
 endif()
 

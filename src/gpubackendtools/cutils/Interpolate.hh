@@ -78,8 +78,67 @@ public:
         length = length_;
         spline_type = spline_type_;
         // printf("spline_type: %d\n", spline_type);
+        // printf("CHECKING:: x0[0]: %.12e; x0[length - 1]: %.12e\n", x0[0], x0[length - 1]);
     };
+
     CUDA_CALLABLE_MEMBER
+    void check_indexing(int spline_index, int index)
+    {
+        if (spline_index >= ninterps)
+        {
+#ifdef __CUDACC__
+            printf("spline_index too high. (%d > %d)\n", spline_index, ninterps);
+#else
+            std::string error_str = "spline_index too high. (" + std::to_string(spline_index) + ">" + std::to_string(ninterps) + ")"; 
+            throw std::invalid_argument(error_str);
+#endif
+        }
+        if (index >= length)
+        {
+#ifdef __CUDACC__
+            printf("index too high. (%d > %d)\n", index, length);
+#else
+            std::string error_str = "index too high. (" + std::to_string(index) + ">" + std::to_string(length) + ")"; 
+            throw std::invalid_argument(error_str);
+#endif // __CUDACC__
+        }
+    };
+
+    CUDA_CALLABLE_MEMBER
+    double get_x0_val(int spline_index, int index)
+    {
+        check_indexing(spline_index, index);
+        return x0[spline_index * length + index];
+    };
+
+    CUDA_CALLABLE_MEMBER
+    double get_y0_val(int spline_index, int index)
+    {
+        check_indexing(spline_index, index);
+        return y0[spline_index * length + index];
+    };
+
+    CUDA_CALLABLE_MEMBER
+    double get_c1_val(int spline_index, int index)
+    {
+        check_indexing(spline_index, index);
+        return c1[spline_index * length + index];
+    };
+
+    CUDA_CALLABLE_MEMBER
+    double get_c2_val(int spline_index, int index)
+    {
+        check_indexing(spline_index, index);
+        return c2[spline_index * length + index];
+    };
+
+    CUDA_CALLABLE_MEMBER
+    double get_c3_val(int spline_index, int index)
+    {
+        check_indexing(spline_index, index);
+        return c3[spline_index * length + index];
+    };
+
     CUDA_CALLABLE_MEMBER
     ~CubicSpline(){};
     CUDA_CALLABLE_MEMBER

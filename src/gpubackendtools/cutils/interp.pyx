@@ -18,6 +18,11 @@ cdef extern from "Interpolate.hh":
         void eval(double *y_new, double *x_new, int* spline_index, int N) except+
         double eval_single(double x_new, int spline_index) except+
         void dealloc() except+
+        double get_x0_val(int spline_index, int index) except+
+        double get_y0_val(int spline_index, int index) except+
+        double get_c1_val(int spline_index, int index) except+
+        double get_c2_val(int spline_index, int index) except+
+        double get_c3_val(int spline_index, int index) except+
 
     
 cdef class pyCubicSplineWrap:
@@ -61,6 +66,21 @@ cdef class pyCubicSplineWrap:
     @property
     def ptr(self) -> long:
         return <uintptr_t>self.g
+
+    def get_c1_val(self, spline_index: int, index: int) -> float:
+        return self.g.get_c1_val(spline_index, index)
+
+    def get_c2_val(self, spline_index: int, index: int) -> float:
+        return self.g.get_c2_val(spline_index, index)
+
+    def get_c3_val(self, spline_index: int, index: int) -> float:
+        return self.g.get_c3_val(spline_index, index)
+
+    def get_x0_val(self, spline_index: int, index: int) -> float:
+        return self.g.get_x0_val(spline_index, index)
+
+    def get_y0_val(self, spline_index: int, index: int) -> float:
+        return self.g.get_y0_val(spline_index, index)
 
     def eval_single(self, x_new, spline_index):
         return self.g.eval_single(x_new, spline_index)

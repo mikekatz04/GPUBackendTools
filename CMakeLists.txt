@@ -50,6 +50,7 @@ set(GBT_MARCH "native"
     CACHE STRING "Value of the -march compiler option if supported by compiler")
 set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_MARCH)
 
+
 # GBT_LAPACKE_DETECT_WITH sets the tool used to try to detect LAPACKE locally.
 # Possible values are:
 #
@@ -66,7 +67,7 @@ set_property(CACHE GBT_LAPACKE_DETECT_WITH PROPERTY STRINGS "AUTO" "CMAKE"
 set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_LAPACKE_DETECT_WITH)
 
 # GBT_LAPACKE_FETCH controls whether LAPACKE sources will be downloaded and
-# compiled with GBT backends. Possible values are:
+# compiled with fast LISA response backends. Possible values are:
 #
 # * AUTO: will try to locate LAPACKE locally and, in case of failure, will
 #   enable the fetch mechanism
@@ -86,9 +87,11 @@ set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_LAPACKE_FETCH)
 include(CheckLinkerFlag)
 check_linker_flag(CXX "-lgfortran" GFORTRAN_AVAILABLE)
 if(GFORTRAN_AVAILABLE)
+  message(STATUS "gfortran available.")
   set(DEFAULT_EXTRA_LIBS "gfortran")
 else()
   set(DEFAULT_EXTRA_LIBS "")
+  message(STATUS "gfortran NOT available.")
 endif()
 set(GBT_LAPACKE_EXTRA_LIBS "${DEFAULT_EXTRA_LIBS}"
     CACHE STRING "Extra libs to link to when\
@@ -96,6 +99,7 @@ linking against LAPACKE.")
 set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_LAPACKE_EXTRA_LIBS)
 unset(GFORTRAN_AVAILABLE)
 unset(DEFAULT_EXTRA_LIBS)
+
 
 # ---- Phony target for project specific properties ----
 add_library(gpubackendtools INTERFACE)

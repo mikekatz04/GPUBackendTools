@@ -23,20 +23,9 @@ cdef extern from "Interpolate.hh":
         double get_c1_val(int spline_index, int index) except+
         double get_c2_val(int spline_index, int index) except+
         double get_c3_val(int spline_index, int index) except+
-
+        int spline_type
     
 cdef class pyCubicSplineWrap:
-    cdef CubicSplineWrap *g
-    cdef uintptr_t x0_ptr
-    cdef uintptr_t y0_ptr
-    cdef uintptr_t c1_ptr
-    cdef uintptr_t c2_ptr
-    cdef uintptr_t c3_ptr
-    cdef int length
-    cdef int ninterps
-    cdef int spline_type
-
-
     def __cinit__(self, x0, y0, c1, c2, c3, ninterps, length, spline_type):
         self.x0_ptr = x0
         self.y0_ptr = y0
@@ -62,6 +51,10 @@ cdef class pyCubicSplineWrap:
 
     def __reduce__(self):
         return (rebuild_cublic_spline, (self.x0_ptr, self.y0_prt, self.c1_ptr, self.c2_ptr, self.c3_ptr, self.ninterps, self.length, self.spline_type))
+
+    @property
+    def spline_type(self):
+        return self.g.spline_type
 
     @property
     def ptr(self) -> long:

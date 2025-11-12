@@ -401,11 +401,11 @@ CUDA_CALLABLE_MEMBER
 CubicSplineSegment CubicSpline::get_cublic_spline_segment(double x_new, int spline_index)
 {
     int window = get_window(x_new, spline_index); 
-    // if (window == -2)
-    // {
-    //   printf("OUTSIDE: %e %e %e %d %d %d\n", x_new, x0[spline_index * length], x0[spline_index * length + length - 1], window, length, spline_index);
-    //   throw std::invalid_argument("BAD.");
-    // }    
+    if (window == -2)
+    {
+      // printf("OUTSIDE: %e %e %e %d %d %d\n", x_new, x0[spline_index * length], x0[spline_index * length + length - 1], window, length, spline_index);
+      throw std::invalid_argument("BAD.");
+    }    
     int _index = spline_index * length + window; 
     CubicSplineSegment segment(x0[_index], y0[_index], c1[_index], c2[_index], c3[_index], spline_type);
     return segment;

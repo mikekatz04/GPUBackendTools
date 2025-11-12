@@ -22,3 +22,6 @@ recursive-include tests/testsuites  *
 
 # Include scripts
 recursive-include scripts   *
+
+# Include pxd files
+global-include *.pxd

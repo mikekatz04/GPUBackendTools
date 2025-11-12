@@ -410,7 +410,7 @@ if(GBT_WITH_CPU)
   # Now, link against ${GBT_LAPACKE_LIBS} to link against liblapacke.so and
   # include lapacke.h
   target_link_libraries(gbt_cpu_interp LINK_PUBLIC ${GBT_LAPACKE_LIBS}
-                        ${GBT_LAPACKE_EXTRA_LIBS} -lgfortran)
+                        ${GBT_LAPACKE_EXTRA_LIBS})
 
 endif()
 

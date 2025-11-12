@@ -168,9 +168,6 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
             self.ninterps,
         )
 
-        _inputs, tkwargs = wrapper(self.x_flat, self.y_flat, self.c1_flat, self.c2_flat, self.c3_flat, self.ninterps, self.length, self.spline_type)
-        self._cpp_class = self.backend.pyCubicSplineWrap(*_inputs)
-
     @property
     def spline_type(self) -> int:
         return self._spline_type
@@ -252,6 +249,9 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
     
     @property
     def cpp_class(self):
+        _inputs, tkwargs = wrapper(self.x_flat, self.y_flat, self.c1_flat, self.c2_flat, self.c3_flat, self.ninterps, self.length, self.spline_type)
+        # must store it or will lose access to attributes (do not do return self.backend...)
+        self._cpp_class = self.backend.pyCubicSplineWrap(*_inputs)
         return self._cpp_class
     
     def __call__(self, x_new, ind_interps = None, use_c_backend=False):

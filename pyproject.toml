@@ -99,6 +99,11 @@ sdist.include = [
   "src/gpubackendtools_backend_cuda11x/git_version.py",
   "src/gpubackendtools_backend_cuda12x/git_version.py",
   "tests/",
+  "src/gpubackendtools/cutils/CubicSpline.cu",
+  "src/gpubackendtools/cutils/Interpolate.cu",
+  "src/gpubackendtools/cutils/Interpolate.hh",
+  "src/gpubackendtools/cutils/cuda_complex.hpp",
+  "src/gpubackendtools/cutils/gbt_global.h",
 ]
 sdist.exclude = [
   ".devcontainer/",

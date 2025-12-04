@@ -1,7 +1,7 @@
 #ifndef __INTERPOLATE_HH__
 #define __INTERPOLATE_HH__
 
-#include "global.h"
+#include "gbt_global.h"
 void interpolate(double* x, double* propArrays,
                  double* B, double* upper_diag, double* diag, double* lower_diag,
                  int length, int ninterps);

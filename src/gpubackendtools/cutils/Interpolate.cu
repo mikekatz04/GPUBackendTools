@@ -1,4 +1,4 @@
-#include "global.h"
+#include "gbt_global.h"
 #include "Interpolate.hh"
 
 #ifdef __CUDACC__

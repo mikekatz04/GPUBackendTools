@@ -399,7 +399,7 @@ if(GBT_WITH_CPU)
                      Interpolate.cxx)
   apply_cpu_backend_common_options(interp)
   target_sources(
-    gbt_cpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp global.h
+    gbt_cpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp gbt_global.h
                   Interpolate.hh)
 
   # interp needs to link against LAPACKE. USe the following method to detect
@@ -420,7 +420,7 @@ if(GBT_WITH_GPU)
                      Interpolate.cu)
   apply_gpu_backend_common_options(interp)
   target_sources(
-    gbt_gpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp global.h
+    gbt_gpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp gbt_global.h
                             Interpolate.hh)
 endif()
 

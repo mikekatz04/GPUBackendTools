@@ -100,7 +100,6 @@ class Backend:
     def _check_module_installed(backend_name: str, module_name: str):
         """Check that the module containing the backend implementation is installed."""
         import importlib
-        breakpoint()
         try:
             importlib.import_module(module_name)
         except ModuleNotFoundError as e:

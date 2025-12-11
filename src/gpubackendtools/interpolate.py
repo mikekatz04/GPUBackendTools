@@ -18,6 +18,7 @@
 
 import numpy as np
 
+import warnings
 from .parallelbase import GBTParallelModuleBase
 from .pointeradjust import wrapper
 
@@ -254,7 +255,7 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         self._cpp_class = self.backend.pyCubicSplineWrap(*_inputs)
         return self._cpp_class
     
-    def __call__(self, x_new, ind_interps = None, use_c_backend=False):
+    def __call__(self, x_new, ind_interps = None, use_c_backend=False, error_out_of_bounds = True):
         
         if use_c_backend:
             raise NotImplementedError
@@ -282,10 +283,21 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         x_new = x_new.reshape(num_interps_here, x_new.shape[-1])
 
         assert x_new.shape == ind_interps_all.shape
-        assert self.xp.all(
-            x_new <= self.x_interp_shape[ind_interps].max(axis=-1)[:, None]
-        ) and self.xp.all(x_new >= self.x_interp_shape[ind_interps].min(axis=-1)[:, None])
-
+        bool1 = x_new <= self.x_interp_shape[ind_interps].max(axis=-1)[:, None]
+        bool2 = x_new >= self.x_interp_shape[ind_interps].min(axis=-1)[:, None]
+        fix = False
+        if not (
+            self.xp.all(
+                bool1
+            ) and self.xp.all(
+                bool2
+            )
+        ):
+            if error_out_of_bounds:
+                raise ValueError("New x array values are not within the bounds of the input x array for the spline. Either change the new xarray or run with error_out_of_bounds = False.") 
+            else:
+                fix = True
+                
         segment_inds = (
             searchsorted2d_vec(
                 self.x_interp_shape[ind_interps],
@@ -310,6 +322,10 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         dx = x_new - x0
 
         y_new = y0 + c1 * dx + c2 * dx**2 + c3 * dx**3
+
+        if fix:
+            warnings.warn("New x array contains values outside domain of spline. Putting zeros outside domain.")
+            y_new[~(bool1 & bool2)] = 0.0
 
         if hasattr(self.xp, "cuda"):
             self.xp.get_default_memory_pool().free_all_block()

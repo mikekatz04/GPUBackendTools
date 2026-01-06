@@ -357,5 +357,6 @@ function(apply_gpu_backend_common_options libname pkg_name pkg_install is_static
   set_property(TARGET ${target_name} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   set_property(TARGET ${target_name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
   set_property(TARGET ${target_name} PROPERTY POSITION_INDEPENDENT_CODE ON)  # -fPic
+  target_compile_definitions(${target_name} PUBLIC __CUDA_COMPILATION__) 
 
 endfunction()

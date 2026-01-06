@@ -91,11 +91,6 @@ jobs:
             kind: core
             reqpython: '>=3.9'
           - release: cpu
-            os: ubuntu-24.04-arm
-            arch: arch64
-            kind: core
-            reqpython: '>=3.10'
-          - release: cpu
             os: macos-15-intel
             kind: core
             reqpython: '>=3.9'

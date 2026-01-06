@@ -104,6 +104,7 @@ sdist.include = [
   #"src/gpubackendtools/cutils/Interpolate.hh",
   "src/gpubackendtools/cutils/cuda_complex.hpp",
   "src/gpubackendtools/cutils/gbt_global.h",
+  "src/gpubackendtools/cutils/pybind11_cuda_array_interface.hpp", 
   "src/gpubackendtools/cutils/cmake_functions.cmake",
 ]
 sdist.exclude = [
@@ -122,11 +123,11 @@ sdist.exclude = [
 
 wheel.exclude = [
   "**.pyx",
-  "**.cu",
-  "**.cxx",
-  "**.hh",
-  "**.h",
-  "**.hpp",
+  # "**.cu",
+  # "**.cxx",
+  # "**.hh",
+  # "**.h",
+  # "**.hpp",
   "**/CMakeLists.txt",
   "lib/pkgconfig",
   "lib/cmake",

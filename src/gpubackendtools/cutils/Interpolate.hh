@@ -2,6 +2,8 @@
 #define __INTERPOLATE_HH__
 
 #include "gbt_global.h"
+
+
 void interpolate(double* x, double* propArrays,
                  double* B, double* upper_diag, double* diag, double* lower_diag,
                  int length, int ninterps);
@@ -155,6 +157,21 @@ public:
     int binary_search(double *array, int nmin, int nmax, double x);
     CUDA_CALLABLE_MEMBER
     int even_sampled_search(double *array, int nmin, int nmax, double x);
+};
+
+
+
+class AddCubicSpline{
+  public:
+    void add_cubic_spline(CubicSpline *spline, double *x0_, double *y0_, double *c1_, double *c2_, double *c3_, double ninterps_, int length_, int spline_type_)
+    {
+        if (spline != NULL)
+        {
+            delete spline;
+        }
+        spline = new CubicSpline(x0_, y0_, c1_, c2_, c3_, ninterps_, length_, spline_type_);
+    };
+    void dealloc_spline(CubicSpline *spline){delete spline;}
 };
 
 #endif // __INTERPOLATE_HH__

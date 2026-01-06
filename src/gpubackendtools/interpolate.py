@@ -249,8 +249,22 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         return [self.x_flat, self.y_flat, self.c1_flat, self.c2_flat, self.c3_flat]
     
     @property
+    def cpp_class_args(self) -> tuple:
+        """Argument tuple for Cython class."""
+        return (
+            self.x_flat, 
+            self.y_flat, 
+            self.c1_flat, 
+            self.c2_flat, 
+            self.c3_flat, 
+            self.ninterps, 
+            self.length, 
+            self.spline_type
+        )
+
+    @property
     def cpp_class(self):
-        _inputs, tkwargs = wrapper(self.x_flat, self.y_flat, self.c1_flat, self.c2_flat, self.c3_flat, self.ninterps, self.length, self.spline_type)
+        _inputs, tkwargs = wrapper(*self.cpp_class_args)
         # must store it or will lose access to attributes (do not do return self.backend...)
         self._cpp_class = self.backend.pyCubicSplineWrap(*_inputs)
         return self._cpp_class

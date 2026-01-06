@@ -75,7 +75,7 @@ jobs:
           echo "value=${VERSION}" >> $GITHUB_OUTPUT
           echo "version: ${VERSION}" >> $GITHUB_STEP_SUMMARY
   build:
-    name: lisaanalysistools-${{ matrix.release }} on ${{ matrix.os }}-${{ matrix.arch }}
+    name: gpubackendtools-${{ matrix.release }} on ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     needs:
       - select
@@ -129,20 +129,15 @@ jobs:
         if: matrix.kind == 'core' && needs.select.outputs.core-suffix == 'true'
         run: |
           sed -i'' -e 's|" #@NAMESUFFIX@|-${{ matrix.release }}"|g' pyproject.toml
-      # Add CuPy dependency
-      - name: Add Cupy dependency
-        if: matrix.kind == 'cuda_plugin'
-        run: |
-          sed -i'' -e 's|#@DEPS_CUPYCUDA@|"cupy-cuda${{ matrix.cuda_major }}x"|g' pyproject.toml
       # Add Core project dependency
       - name: Add core project dependency on plugin
         if: matrix.kind != 'core' && needs.select.outputs.core-suffix == 'true'
         run: |
-          sed -i'' -e 's|#@DEPS_GBTCORE@|"lisaanalysistools-cpu==${{ needs.version.outputs.version }}"|g' pyproject.toml
+          sed -i'' -e 's|#@DEPS_GBTCORE@|"gpubackendtools-cpu==${{ needs.version.outputs.version }}"|g' pyproject.toml
       - name: Add core project dependency on plugin
         if: matrix.kind != 'core' && needs.select.outputs.core-suffix == 'false'
         run: |
-          sed -i'' -e 's|#@DEPS_GBTCORE@|"lisaanalysistools==${{ needs.version.outputs.version }}"|g' pyproject.toml
+          sed -i'' -e 's|#@DEPS_GBTCORE@|"gpubackendtools==${{ needs.version.outputs.version }}"|g' pyproject.toml
       # Remove base sources from plugin wheels
       - name: Exclude core package from plugins
         if: matrix.kind != 'core'
@@ -161,7 +156,7 @@ jobs:
       # =====================
       #
       - name: Install pypa/build
-        run: python -m pip install build
+        run: python -m pip install build 
       - uses: fortran-lang/setup-fortran@v1
         if: matrix.kind == 'core'
         id: setup-fortran
@@ -170,12 +165,12 @@ jobs:
           version: 14
       - name: Build core wheels (macOS)
         if: runner.os == 'macOS' && matrix.kind == 'core'
-        run: python -m build ./ --outdir dist/
+        run: python -m build ./ --outdir dist/ -CSETUPTOOLS_SCM_PRETEND_VERSION=${{needs.version.outputs.version}}
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_ver }}
       - name: Build core wheels (Linux)
         if: runner.os == 'Linux' && matrix.kind == 'core'
-        run: python -m build ./ --outdir dist/
+        run: python -m build ./ --outdir dist/ -CSETUPTOOLS_SCM_PRETEND_VERSION=${{needs.version.outputs.version}}
       # =====================
       # = V. Upload wheels  =
       # =====================

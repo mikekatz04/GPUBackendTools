@@ -144,11 +144,6 @@ jobs:
         run: |
           sed -i'' -e '/@SKIP_PLUGIN@/d' pyproject.toml
 
-
-      - name: Adjust version
-        run: |
-          sed -i'' -e 's|#@VERSION_ADD@|"version = \"${{ needs.version.outputs.version }}\""|g' pyproject.toml
-
       #@VERSION_ADD@
       # ===================================
       # = III. Prepare build environment  =
@@ -174,10 +169,14 @@ jobs:
         if: runner.os == 'macOS' && matrix.kind == 'core'
         run: python -m build ./ --outdir dist/
         env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{needs.version.outputs.version}}
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_ver }}
       - name: Build core wheels (Linux)
         if: runner.os == 'Linux' && matrix.kind == 'core'
-        run: python -m build ./ --outdir dist/ 
+        run: python -m build ./ --outdir dist/
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{needs.version.outputs.version}}
+
       # =====================
       # = V. Upload wheels  =
       # =====================

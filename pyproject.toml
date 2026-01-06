@@ -29,6 +29,8 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
 ]
 
+#@VERSION_ADD@
+
 # version is deduced from the lattest git tag
 # description is the docstring at the top of src/gpubackendtools/__init__.py
 dynamic = [ "version" ]

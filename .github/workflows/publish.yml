@@ -143,6 +143,13 @@ jobs:
         if: matrix.kind != 'core'
         run: |
           sed -i'' -e '/@SKIP_PLUGIN@/d' pyproject.toml
+
+
+      - name: Adjust version
+        run: |
+          sed -i'' -e 's|#@VERSION_ADD@|"version = \"${{ needs.version.outputs.version }}\""|g' pyproject.toml
+
+      #@VERSION_ADD@
       # ===================================
       # = III. Prepare build environment  =
       # ===================================
@@ -165,12 +172,12 @@ jobs:
           version: 14
       - name: Build core wheels (macOS)
         if: runner.os == 'macOS' && matrix.kind == 'core'
-        run: python -m build ./ --outdir dist/ -CSETUPTOOLS_SCM_PRETEND_VERSION=${{needs.version.outputs.version}}
+        run: python -m build ./ --outdir dist/
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_ver }}
       - name: Build core wheels (Linux)
         if: runner.os == 'Linux' && matrix.kind == 'core'
-        run: python -m build ./ --outdir dist/ -CSETUPTOOLS_SCM_PRETEND_VERSION=${{needs.version.outputs.version}}
+        run: python -m build ./ --outdir dist/ 
       # =====================
       # = V. Upload wheels  =
       # =====================

@@ -5,7 +5,8 @@
 #include "stdio.h"
 
 #ifdef __CUDACC__
-#define CUDA_CALLABLE_MEMBER __device__
+#define CUDA_CALLABLE_MEMBER __host__ __device__
+#define CUDA_DEVICE __device__
 #define CUDA_KERNEL __global__
 #define CUDA_SHARED __shared__
 #define CUDA_SYNC_THREADS __syncthreads();
@@ -22,6 +23,7 @@ inline void gpuAssert2(cudaError_t code, const char *file, int line, bool abort=
 }
 #else
 #define CUDA_CALLABLE_MEMBER
+#define CUDA_DEVICE
 #define CUDA_KERNEL
 #define CUDA_SHARED
 #define CUDA_SYNC_THREADS

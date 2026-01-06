@@ -70,6 +70,21 @@ jobs:
           echo "notice:: Detected version: ${VERSION}"
           echo "value=${VERSION}" >> $GITHUB_OUTPUT
           echo "version: ${VERSION}" >> $GITHUB_STEP_SUMMARY  
+  
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel
+        
+      - name: Build wheels
+        run: python -m cibuildwheel --output-dir dist
+        # The cibuildwheel command automatically detects and uses scikit-build-core 
+        # as the backend based on your pyproject.toml file.
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels
+          path: dist/*.whl          
+  
   publish:
     runs-on: ubuntu-latest
     environment: pypiconf

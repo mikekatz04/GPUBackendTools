@@ -242,6 +242,9 @@ class _CudaBackend(Backend):
 
         try:
             cupy_cuda_ver = cupy.cuda.get_local_runtime_version() // 1000
+        except AttributeError:
+            print("NEED TO REMOVE")
+            cupy_cuda_ver = 12
         except RuntimeError as e:
             raise SoftwareException("CuPy could not detect runtime version") from e
 

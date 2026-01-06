@@ -92,7 +92,7 @@ jobs:
             reqpython: '>=3.9'
           - release: cpu
             os: ubuntu-24.04-arm
-            arch: aarch64
+            arch: arch64
             kind: core
             reqpython: '>=3.10'
           - release: cpu
@@ -182,7 +182,7 @@ jobs:
       # =====================
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{matrix.os}}
+          name: wheels-${{ strategy.job-index }}
           path: ./dist/*.whl
   
   publish:

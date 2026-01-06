@@ -75,6 +75,9 @@ jobs:
           echo "value=${VERSION}" >> $GITHUB_OUTPUT
           echo "version: ${VERSION}" >> $GITHUB_STEP_SUMMARY
   build:
+    needs:
+      - select
+      - version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

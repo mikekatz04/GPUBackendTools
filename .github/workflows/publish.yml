@@ -183,7 +183,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: wheels
-          path: ./dist/*
+          path: ./dist/*.whl
   
   publish:
     runs-on: ubuntu-latest

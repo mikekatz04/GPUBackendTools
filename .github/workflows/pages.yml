@@ -12,34 +12,34 @@ jobs:
     steps:
       - name: initialize
         run: |
-          echo "GPUBACKENDTOOLSPAGE_BUILD=false" >> "$GITHUB_ENV"
-          echo "GPUBACKENDTOOLSPAGE_PUBLISH=false" >> "$GITHUB_ENV"
-          echo "GPUBACKENDTOOLSPAGE_NOTEBOOK=false" >> "$GITHUB_ENV"
+          echo "GBTPAGE_BUILD=false" >> "$GITHUB_ENV"
+          echo "GBTPAGE_PUBLISH=false" >> "$GITHUB_ENV"
+          echo "GBTPAGE_NOTEBOOK=false" >> "$GITHUB_ENV"
       - name: build on commit message
         if: contains(github.event.head_commit.message, '[ci:build-pages]')
         run: |
-          echo "GPUBACKENDTOOLSPAGE_BUILD=true" >> "$GITHUB_ENV"
+          echo "GBTPAGE_BUILD=true" >> "$GITHUB_ENV"
       - name: build on commit message
         if: contains(github.event.head_commit.message, '[ci:publish-pages]')
         run: |
-          echo "GPUBACKENDTOOLSPAGE_BUILD=true" >> "$GITHUB_ENV"
-          echo "GPUBACKENDTOOLSPAGE_PUBLISH=true" >> "$GITHUB_ENV"
+          echo "GBTPAGE_BUILD=true" >> "$GITHUB_ENV"
+          echo "GBTPAGE_PUBLISH=true" >> "$GITHUB_ENV"
       - name: execute notebooks on request
         if: contains(github.event.head_commit.message, '[doc:run-notebooks]')
         run: |
-          echo "GPUBACKENDTOOLSPAGE_NOTEBOOK=true" >> "$GITHUB_ENV"
+          echo "GBTPAGE_NOTEBOOK=true" >> "$GITHUB_ENV"
       - name: build and publish on tag 'v*'
         if: startsWith(github.event.ref, 'refs/tags/v')
         run: |
-          echo "GPUBACKENDTOOLSPAGE_BUILD=true" >> "$GITHUB_ENV"
-          echo "GPUBACKENDTOOLSPAGE_PUBLISH=true" >> "$GITHUB_ENV"
-          echo "GPUBACKENDTOOLSPAGE_NOTEBOOK=true" >> "$GITHUB_ENV"
+          echo "GBTPAGE_BUILD=true" >> "$GITHUB_ENV"
+          echo "GBTPAGE_PUBLISH=true" >> "$GITHUB_ENV"
+          echo "GBTPAGE_NOTEBOOK=true" >> "$GITHUB_ENV"
       - name: output results
         id: select
         run: |
-          echo "build=$GPUBACKENDTOOLSPAGE_BUILD" >> $GITHUB_OUTPUT
-          echo "publish=$GPUBACKENDTOOLSPAGE_PUBLISH" >> $GITHUB_OUTPUT
-          echo "notebooks=$GPUBACKENDTOOLSPAGE_NOTEBOOK" >> $GITHUB_OUTPUT
+          echo "build=$GBTPAGE_BUILD" >> $GITHUB_OUTPUT
+          echo "publish=$GBTPAGE_PUBLISH" >> $GITHUB_OUTPUT
+          echo "notebooks=$GBTPAGE_NOTEBOOK" >> $GITHUB_OUTPUT
   build_doc:
     name: Build documentation
     runs-on: "ubuntu-24.04"
@@ -65,7 +65,7 @@ jobs:
       - name: Install bare package
         run: |
           python -m pip install '.[doc, testing]' \
-            --config-settings=cmake.define.GPUBACKENDTOOLS_WITH_GPU=OFF
+            --config-settings=cmake.define.GBT_WITH_GPU=OFF
       # - name: Restore the cache
       #   uses: actions/cache/restore@v4
       #   id: restore_cache
@@ -75,8 +75,8 @@ jobs:
       # - name: Export configuration options to force using prefetched cache of files
       #   if: steps.restore_cache.outputs.cache-hit == 'true'
       #   run: |
-      #     echo "GPUBACKENDTOOLS_FILE_ALLOW_DOWNLOAD=no" >> "$GITHUB_ENV"
-      #     echo "GPUBACKENDTOOLS_FILE_EXTRA_PATHS=$(pwd)/local_cache" >> "$GITHUB_ENV"
+      #     echo "GBT_FILE_ALLOW_DOWNLOAD=no" >> "$GITHUB_ENV"
+      #     echo "GBT_FILE_EXTRA_PATHS=$(pwd)/local_cache" >> "$GITHUB_ENV"
       # - name: Run notebook examples
       #   if: needs.select.outputs.notebooks == 'true'
       #   run: |

@@ -80,7 +80,7 @@ set_property(CACHE GBT_LAPACKE_FETCH PROPERTY STRINGS "AUTO" "ON" "OFF")
 set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_LAPACKE_FETCH)
 
 # Explicitly set the path to gfortran
-set(CMAKE_Fortran_COMPILER "/opt/homebrew/bin/gfortran") 
+# set(CMAKE_Fortran_COMPILER "/opt/homebrew/bin/gfortran") 
 
 # GBT_LAPACKE_EXTRA_LIBS sets extra libraries that must be linked when linking
 # LAPACKE. For example, if importing the CPU backend fails and complains about

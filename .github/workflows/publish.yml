@@ -167,12 +167,12 @@ jobs:
           version: 14
       - name: Build core wheels (macOS)
         if: runner.os == 'macOS' && matrix.kind == 'core'
-        uses: pypa/build
+        uses: pypa/build@1.3.0
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_ver }}
       - name: Build core wheels (Linux)
         if: runner.os == 'Linux' && matrix.kind == 'core'
-        uses: pypa/build
+        uses: pypa/build@1.3.0
       # =====================
       # = V. Upload wheels  =
       # =====================

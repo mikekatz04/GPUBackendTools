@@ -173,11 +173,11 @@ ect.toml
       - name: Retrieve release distributions
         uses: actions/download-artifact@v4
         with:
-          path: dist/
+          path: wheelhouse/
           merge-multiple: true
       - name: List wheels
         run: |
-          ls -al dist/*
+          ls -al wheelhouse/*
       - name: Install twine from PyPI
         uses: install-pinned/twine@c7ca21f7f66fc895b73cba784dc1d0e302e3b4a3 # 6.1.0
       - name: Publish release distributions to registry
@@ -187,4 +187,4 @@ ect.toml
           TWINE_REPOSITORY: ${{ vars.TWINE_REPOSITORY }}
           TWINE_USERNAME: ${{ vars.TWINE_USERNAME }}
         run: |
-          twine upload dist/*
+          twine upload wheelhouse/*

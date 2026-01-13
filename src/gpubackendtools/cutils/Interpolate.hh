@@ -3,6 +3,11 @@
 
 #include "gbt_global.h"
 
+#if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
+#define CubicSpline CubicSplineGPU
+#else
+#define CubicSpline CubicSplineCPU
+#endif
 
 void interpolate(double* x, double* propArrays,
                  double* B, double* upper_diag, double* diag, double* lower_diag,
@@ -159,19 +164,5 @@ public:
     int even_sampled_search(double *array, int nmin, int nmax, double x);
 };
 
-
-
-class AddCubicSpline{
-  public:
-    void add_cubic_spline(CubicSpline *spline, double *x0_, double *y0_, double *c1_, double *c2_, double *c3_, double ninterps_, int length_, int spline_type_)
-    {
-        if (spline != NULL)
-        {
-            delete spline;
-        }
-        spline = new CubicSpline(x0_, y0_, c1_, c2_, c3_, ninterps_, length_, spline_type_);
-    };
-    void dealloc_spline(CubicSpline *spline){delete spline;}
-};
 
 #endif // __INTERPOLATE_HH__

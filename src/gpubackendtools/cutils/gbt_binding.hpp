@@ -28,7 +28,7 @@ using array_type = py::array_t<T>;
 class CubicSplineWrap {
   public:
     CubicSpline *spline;
-    CubicSplineWrap(array_type<double> x0_, array_type<double> y0_, array_type<double> c1_, array_type<double> c2_, array_type<double> c3_, double ninterps_, int length_, int spline_type_)
+    CubicSplineWrap(array_type<double> x0_, array_type<double> y0_, array_type<double> c1_, array_type<double> c2_, array_type<double> c3_, int ninterps_, int length_, int spline_type_)
     {
 
         double *_x0 = return_pointer_and_check_length(x0_, "x0", length_, ninterps_);
@@ -42,11 +42,9 @@ class CubicSplineWrap {
     ~CubicSplineWrap(){
         delete spline;
     };
-    void get_light_travel_time_wrap(array_type<double> ltt, array_type<double> t, array_type<int> link, int num);
-    void get_normal_unit_vec_wrap(array_type<double>normal_unit_vec_x, array_type<double>normal_unit_vec_y, array_type<double>normal_unit_vec_z, array_type<double>t, array_type<int>link, int num);
-    void get_pos_wrap(array_type<double> pos_x, array_type<double> pos_y, array_type<double> pos_z, array_type<double> t, array_type<int> sc, int num);
+    void eval_wrap(array_type<double>y_new, array_type<double>x_new, array_type<int>spline_index, int N);
     template<typename T>
-    T* return_pointer_and_check_length(array_type<T> input1, std::string name, int N, int multiplier)
+    static T* return_pointer_and_check_length(array_type<T> input1, std::string name, int N, int multiplier)
     {
 #if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
         T *ptr1 = static_cast<T *>(input1.get_compatible_typed_pointer());

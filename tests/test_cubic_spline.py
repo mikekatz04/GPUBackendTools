@@ -98,5 +98,5 @@ class CubicSplineTest(unittest.TestCase):
         scipy_check = spl_scipy(_x_new)
 
         _y_new = np.zeros_like(_x_new)
-        cpp_class.eval(_y_new, _x_new, np.zeros_like(_x_new, dtype=np.int32), len(_x_new))
+        cpp_class.eval_wrap(_y_new, _x_new, np.zeros_like(_x_new, dtype=np.int32), len(_x_new))
         self.assertTrue(np.allclose(_y_new, scipy_check))

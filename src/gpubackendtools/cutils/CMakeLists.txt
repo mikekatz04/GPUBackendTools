@@ -33,18 +33,7 @@ endif()
 # --- interp ---
 # ----------------
 
-# I. Process interp.pyx into a C++ file
-add_custom_command(
-  OUTPUT "interp.cxx"
-  COMMENT "Cythonize interp.pyx into interp.cxx"
-  COMMAND
-    Python::Interpreter -m cython "${CMAKE_CURRENT_SOURCE_DIR}/interp.pyx"
-    --output-file "${CMAKE_CURRENT_BINARY_DIR}/interp.cxx" -3 -+ --module-name
-    "interp" -I "${CMAKE_CURRENT_SOURCE_DIR}"
-  DEPENDS "interp.pyx"
-  VERBATIM)
-
-# II. Declare the CPU backend
+# I. Declare the CPU backend
 if(GBT_WITH_CPU)
   add_custom_command(
     OUTPUT "Interpolate.cxx"
@@ -55,20 +44,26 @@ if(GBT_WITH_CPU)
     DEPENDS "Interpolate.cu"
     VERBATIM)
 
-  python_add_library(gpubackendtools_cpu_interp MODULE WITH_SOABI interp.cxx
-                     Interpolate.cxx)
-  apply_cpu_backend_common_options(interp gbt gpubackendtools false)
-  target_sources(
-    gpubackendtools_cpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp gbt_global.h
-                  Interpolate.hh)
-
   # interp needs to link against LAPACKE. USe the following method to detect
   # it and obtain ${GBT_LAPACKE_LIBS}. In case of failure, it will stop the
   # processing execution.
   enable_language(Fortran)
   get_lapacke()
-  # Now, link against ${GBT_LAPACKE_LIBS} to link against liblapacke.so and
-  # include lapacke.h
+
+  add_library(gpubackendtools_cpu_interp_static STATIC Interpolate.cxx)
+  apply_cpu_backend_common_options(interp gbt gpubackendtools true)
+  # target_include_directories(gpubackendtools_cpu_interp_static PUBLIC ${GBT_CUTILS})
+  target_sources(gpubackendtools_cpu_interp_static PUBLIC FILE_SET HEADERS FILES
+                                        Interpolate.hh)
+  target_link_libraries(gpubackendtools_cpu_interp_static LINK_PUBLIC ${GBT_LAPACKE_LIBS}
+                        ${GBT_LAPACKE_EXTRA_LIBS})
+
+  pybind11_add_module(gpubackendtools_cpu_interp gbt_binding.cxx)
+  apply_cpu_backend_common_options(interp gbt gpubackendtools false)
+  target_link_libraries(gpubackendtools_cpu_interp PRIVATE gpubackendtools_cpu_interp_static)
+  # target_include_directories(gpubackendtools_cpu_interp PUBLIC ${GBT_CUTILS})
+  target_sources(gpubackendtools_cpu_interp PUBLIC FILE_SET HEADERS FILES
+                                      gbt_binding.hpp)
   target_link_libraries(gpubackendtools_cpu_interp LINK_PUBLIC ${GBT_LAPACKE_LIBS}
                         ${GBT_LAPACKE_EXTRA_LIBS})
 

@@ -6,10 +6,11 @@
 cmake_minimum_required(VERSION 3.23...3.31)
 
 # ---- Main project definition ----
-project(gpubackendtools VERSION ${SKBUILD_PROJECT_VERSION} LANGUAGES CXX Fortran)
+project(gpubackendtools VERSION ${SKBUILD_PROJECT_VERSION} LANGUAGES CXX Fortran) #@ADD_CUDA_HERE
 
 # ---- Find required dependencies ----
 find_package(Python COMPONENTS Interpreter Development.Module NumPy REQUIRED)
+find_package(pybind11 CONFIG)
 
 # This line defines the install directory variables
 include(GNUInstallDirs)

@@ -1,9 +1,9 @@
-#include "Detector.hpp"
+#include "Interpolate.hh"
 #include <string>
 #include <iostream>
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
-#include "binding.hpp"
+#include "gbt_binding.hpp"
 
 #if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
 #include "pybind11_cuda_array_interface.hpp"
@@ -12,56 +12,36 @@
 namespace py = pybind11;
 
 
-void OrbitsWrap::get_light_travel_time_wrap(array_type<double> ltt, array_type<double> t, array_type<int> link, int num)
+void CubicSplineWrap::eval_wrap(array_type<double>y_new, array_type<double>x_new, array_type<int>spline_index, int N)
 {
-    orbits->get_light_travel_time_arr(
-        return_pointer_and_check_length(ltt, "ltt", num, 1),
-        return_pointer_and_check_length(t, "t", num, 1),
-        return_pointer_and_check_length(link, "sc", num, 1),
-        num
+    spline->eval(
+        return_pointer_and_check_length(y_new, "y_new", N, 1),
+        return_pointer_and_check_length(x_new, "x_new", N, 1),
+        return_pointer_and_check_length(spline_index, "spline_index", N, 1),
+        N
     );
 }
 
 
-void OrbitsWrap::get_pos_wrap(array_type<double> pos_x, array_type<double> pos_y, array_type<double> pos_z, array_type<double> t, array_type<int> sc, int num)
+void check_spline(CubicSpline *spline)
 {
-    orbits->get_pos_arr(
-        return_pointer_and_check_length(pos_x, "pos_x", num, 1),
-        return_pointer_and_check_length(pos_y, "pos_y", num, 1),
-        return_pointer_and_check_length(pos_z, "pos_z", num, 1),
-        return_pointer_and_check_length(t, "t", num, 1),
-        return_pointer_and_check_length(sc, "sc", num, 1),
-        num
+    printf("%e\n", spline->x0[0]);
+}
+
+void interpolate_wrap(array_type<double>x, array_type<double>propArrays,
+                 array_type<double>B, array_type<double>upper_diag, array_type<double>diag, array_type<double>lower_diag,
+                 int length, int ninterps)
+{
+    interpolate(
+        CubicSplineWrap::return_pointer_and_check_length(x, "x", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(propArrays, "propArrays", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(B, "B", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(upper_diag, "upper_diag", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(diag, "diag", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(lower_diag, "lower_diag", length, ninterps),
+        length,
+        ninterps
     );
-}
-
-
-void OrbitsWrap::get_normal_unit_vec_wrap(array_type<double>normal_unit_vec_x, array_type<double>normal_unit_vec_y, array_type<double>normal_unit_vec_z, array_type<double>t, array_type<int>link, int num)
-{
-    
-// #ifdef __CUDACC__
-    orbits->get_normal_unit_vec_arr(
-        return_pointer_and_check_length(normal_unit_vec_x, "n_arr_x", num, 1),
-        return_pointer_and_check_length(normal_unit_vec_y, "n_arr_y", num, 1),
-        return_pointer_and_check_length(normal_unit_vec_z, "n_arr_z", num, 1),
-        return_pointer_and_check_length(t, "t", num, 1),
-        return_pointer_and_check_length(link, "link", num, 1),
-        num
-    );
-}
-
-void check_12()
-{
-#if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
-    printf("CHECK 12 GOOD\n");
-#else
-    printf("CHECK 12 BAD\n");
-#endif 
-}
-
-void check_orbits(Orbits *orbits)
-{
-    printf("%e\n", orbits->x_arr[0]);
 }
 
 
@@ -70,8 +50,8 @@ std::string get_module_path() {
     py::gil_scoped_acquire acquire;
 
     // Import the module by its name
-    // Note: The module name here ("pycppdetector") must match the name used in PYBIND11_MODULE
-    py::object module = py::module::import("pycppdetector");
+    // Note: The module name here ("interp") must match the name used in PYBIND11_MODULE
+    py::object module = py::module::import("interp");
 
     // Access the __file__ attribute and cast it to a C++ string
     try {
@@ -86,51 +66,48 @@ std::string get_module_path() {
 
 // PYBIND11_MODULE creates the entry point for the Python module
 // The module name here must match the one used in CMakeLists.txt
-void detector_part(py::module &m) {
+void spline_part(py::module &m) {
 
 #if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
-    py::class_<OrbitsWrap>(m, "OrbitsWrapGPU")
+    py::class_<CubicSplineWrap>(m, "CubicSplineWrapGPU")
 #else
-    py::class_<OrbitsWrap>(m, "OrbitsWrapCPU")
+    py::class_<CubicSplineWrap>(m, "CubicSplineWrapCPU")
 #endif 
 
     // Bind the constructor
-    .def(py::init<double, int, array_type<double>, array_type<double>, array_type<double>, array_type<int>, array_type<int>, array_type<int>, double>(), 
-         py::arg("dt"), py::arg("N"), py::arg("n_arr"), py::arg("ltt_arr"), py::arg("x_arr"), py::arg("links"), py::arg("sc_r"), py::arg("sc_e"), py::arg("armlength"))
+    .def(py::init<array_type<double>, array_type<double>, array_type<double>, array_type<double>, array_type<double>, int, int, int>(), 
+         py::arg("x0"), py::arg("y0"), py::arg("c1"), py::arg("c2"), py::arg("c3"), py::arg("ninterps"), py::arg("length"), py::arg("spline_type"))
     // Bind member functions
-    .def("get_light_travel_time_wrap", &OrbitsWrap::get_light_travel_time_wrap, "Get the light travel time.")
-    .def("get_pos_wrap", &OrbitsWrap::get_pos_wrap, "Get spacecraft position.")
-    .def("get_normal_unit_vec_wrap", &OrbitsWrap::get_normal_unit_vec_wrap, "Get link normal vector.")
+    .def("eval_wrap", &CubicSplineWrap::eval_wrap, "Evaluate splines.")
     // You can also expose public data members directly using def_readwrite
-    .def_readwrite("orbits", &OrbitsWrap::orbits)
-    // .def("get_link_ind", &OrbitsWrap::get_link_ind, "Get link index.")
+    .def_readwrite("spline", &CubicSplineWrap::spline)
+    // .def("get_link_ind", &CubicSplineWrap::get_link_ind, "Get link index.")
     ;
 
 
 #if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
-    py::class_<Orbits>(m, "OrbitsGPU")
+    py::class_<CubicSpline>(m, "CubicSplineGPU")
 #else
-    py::class_<Orbits>(m, "OrbitsCPU")
+    py::class_<CubicSpline>(m, "CubicSplineCPU")
 #endif
 
     // Bind the constructor
-    .def(py::init<double, int, double *, double *, double *, int *, int *, int *, double>(),
-         py::arg("dt"), py::arg("N"), py::arg("n_arr"), py::arg("ltt_arr"), py::arg("x_arr"), py::arg("links"), py::arg("sc_r"), py::arg("sc_e"), py::arg("armlength"))
+    .def(py::init<double *, double *, double *, double *, double *, int, int, int>(),
+         py::arg("x0"), py::arg("y0"), py::arg("c1"), py::arg("c2"), py::arg("c3"), py::arg("ninterps"), py::arg("length"), py::arg("spline_type"))
 
     ;
 }
 
 
 
-PYBIND11_MODULE(pycppdetector, m) {
-    m.doc() = "Orbits/Detector C++ plug-in"; // Optional module docstring
+PYBIND11_MODULE(interp, m) {
+    m.doc() = "Cubic Spline C++ plug-in"; // Optional module docstring
 
     // Call initialization functions from other files
-    detector_part(m);
-    m.def("check_orbits", &check_orbits, "Make sure that we can insert orbits properly.");
-
+    spline_part(m);
+    m.def("check_spline", &check_spline, "Make sure that we can insert spline properly.");
     m.def("get_module_path_cpp", &get_module_path, "Returns the file path of the module");
-    m.def("check_12", &check_12, "Check12");
+    m.def("interpolate_wrap", &interpolate_wrap, "Interpolate arrays.");
     // Optionally, get the path during module initialization and store it
     // This can cause an AttributeError if not handled carefully, as m.attr("__file__")
     // might not be fully set during the initial call if the module is loaded in
@@ -146,5 +123,4 @@ PYBIND11_MODULE(pycppdetector, m) {
         PyErr_Clear();
     }
 }
-
 

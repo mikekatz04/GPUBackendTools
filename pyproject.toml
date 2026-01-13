@@ -1,7 +1,7 @@
 [build-system]
 build-backend = "scikit_build_core.build"
 
-requires = [ "cython", "numpy", "scikit-build-core"]
+requires = ["pybind11", "cython", "numpy", "scikit-build-core"]
 
 
 [project]

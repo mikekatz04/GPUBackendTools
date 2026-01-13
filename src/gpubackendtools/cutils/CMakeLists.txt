@@ -55,31 +55,31 @@ if(GBT_WITH_CPU)
     DEPENDS "Interpolate.cu"
     VERBATIM)
 
-  python_add_library(gbt_cpu_interp MODULE WITH_SOABI interp.cxx
+  python_add_library(gpubackendtools_cpu_interp MODULE WITH_SOABI interp.cxx
                      Interpolate.cxx)
   apply_cpu_backend_common_options(interp gbt gpubackendtools false)
   target_sources(
-    gbt_cpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp gbt_global.h
+    gpubackendtools_cpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp gbt_global.h
                   Interpolate.hh)
 
   # interp needs to link against LAPACKE. USe the following method to detect
   # it and obtain ${GBT_LAPACKE_LIBS}. In case of failure, it will stop the
   # processing execution.
   enable_language(Fortran)
-  gpubackendtools_get_lapacke()
+  get_lapacke()
   # Now, link against ${GBT_LAPACKE_LIBS} to link against liblapacke.so and
   # include lapacke.h
-  target_link_libraries(gbt_cpu_interp LINK_PUBLIC ${GBT_LAPACKE_LIBS}
+  target_link_libraries(gpubackendtools_cpu_interp LINK_PUBLIC ${GBT_LAPACKE_LIBS}
                         ${GBT_LAPACKE_EXTRA_LIBS})
 
 endif()
 
 # III. Declare the GPU backend
 if(GBT_WITH_GPU)
-  python_add_library(gbt_gpu_interp MODULE WITH_SOABI interp.cxx
+  python_add_library(gpubackendtools_gpu_interp MODULE WITH_SOABI interp.cxx
                      Interpolate.cu)
   apply_gpu_backend_common_options(interp gbt gpubackendtools false)
   target_sources(
-    gbt_gpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp gbt_global.h
+    gpubackendtools_gpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp gbt_global.h
                             Interpolate.hh)
 endif()

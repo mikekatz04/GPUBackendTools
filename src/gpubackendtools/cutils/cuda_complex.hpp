@@ -1026,9 +1026,13 @@ acosh(const complex<_Tp>& __x)
             return complex<_Tp>(fabs(__x.real()), __x.imag());
         if (isinf(__x.imag()))
             if (__x.real() > 0)
+            {
                 return complex<_Tp>(__x.real(), copysign(__pi * _Tp(0.25), __x.imag()));
+            }
             else
+            {
                 return complex<_Tp>(-__x.real(), copysign(__pi * _Tp(0.75), __x.imag()));
+            }
         if (__x.real() < 0)
             return complex<_Tp>(-__x.real(), copysign(__pi, __x.imag()));
         return complex<_Tp>(__x.real(), copysign(_Tp(0), __x.imag()));

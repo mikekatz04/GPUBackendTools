@@ -45,7 +45,7 @@ void interpolate_wrap(array_type<double>x, array_type<double>propArrays,
 }
 
 
-std::string get_module_path() {
+std::string get_module_path_gbt() {
     // Acquire the GIL if it's not already held (safe to call multiple times)
     py::gil_scoped_acquire acquire;
 
@@ -106,7 +106,7 @@ PYBIND11_MODULE(interp, m) {
     // Call initialization functions from other files
     spline_part(m);
     m.def("check_spline", &check_spline, "Make sure that we can insert spline properly.");
-    m.def("get_module_path_cpp", &get_module_path, "Returns the file path of the module");
+    m.def("get_module_path_cpp", &get_module_path_gbt, "Returns the file path of the module");
     m.def("interpolate_wrap", &interpolate_wrap, "Interpolate arrays.");
     // Optionally, get the path during module initialization and store it
     // This can cause an AttributeError if not handled carefully, as m.attr("__file__")

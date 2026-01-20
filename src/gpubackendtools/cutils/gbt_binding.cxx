@@ -12,9 +12,10 @@
 namespace py = pybind11;
 
 
-void CubicSplineWrap::eval_wrap(array_type<double>y_new, array_type<double>x_new, array_type<int>spline_index, int N)
+void CubicSplineWrap::eval_wrap_func(array_type<double>y_new, array_type<double>x_new, array_type<int>spline_index, int N)
 {
-    spline->eval(
+    eval_wrap(
+        spline,
         return_pointer_and_check_length(y_new, "y_new", N, 1),
         return_pointer_and_check_length(x_new, "x_new", N, 1),
         return_pointer_and_check_length(spline_index, "spline_index", N, 1),
@@ -78,7 +79,7 @@ void spline_part(py::module &m) {
     .def(py::init<array_type<double>, array_type<double>, array_type<double>, array_type<double>, array_type<double>, int, int, int>(), 
          py::arg("x0"), py::arg("y0"), py::arg("c1"), py::arg("c2"), py::arg("c3"), py::arg("ninterps"), py::arg("length"), py::arg("spline_type"))
     // Bind member functions
-    .def("eval_wrap", &CubicSplineWrap::eval_wrap, "Evaluate splines.")
+    .def("eval_wrap", &CubicSplineWrap::eval_wrap_func, "Evaluate splines.")
     // You can also expose public data members directly using def_readwrite
     .def_readwrite("spline", &CubicSplineWrap::spline)
     // .def("get_link_ind", &CubicSplineWrap::get_link_ind, "Get link index.")
@@ -103,6 +104,10 @@ void spline_part(py::module &m) {
 PYBIND11_MODULE(interp, m) {
     m.doc() = "Cubic Spline C++ plug-in"; // Optional module docstring
 
+    m.attr("CUBIC_SPLINE_LINEAR_SPACING") = CUBIC_SPLINE_LINEAR_SPACING;
+    m.attr("CUBIC_SPLINE_LOG10_SPACING") = CUBIC_SPLINE_LOG10_SPACING;
+    m.attr("CUBIC_SPLINE_GENERAL_SPACING") = CUBIC_SPLINE_GENERAL_SPACING;
+    
     // Call initialization functions from other files
     spline_part(m);
     m.def("check_spline", &check_spline, "Make sure that we can insert spline properly.");

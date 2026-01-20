@@ -11,7 +11,7 @@
 
 
 // See scipy CubicSpline implementation, it matches that
-CUDA_CALLABLE_MEMBER
+CUDA_DEVICE
 void prep_splines(int i, int length, int interp_i, int ninterps, double *b, double *ud, double *diag, double *ld, double *x, double *y)
 {
   double dx1, dx2, d, slope1, slope2;
@@ -227,7 +227,7 @@ for (int j = 0;
 }
 
 // See Scipy CubicSpline for more information
-CUDA_CALLABLE_MEMBER
+CUDA_DEVICE
 void fill_coefficients(int i, int length, int interp_i, int ninterps, double *dydx, double *x, double *y, double *coeff1, double *coeff2, double *coeff3)
 {
   double slope, t, dydx_i;
@@ -337,15 +337,12 @@ void interpolate(double *x, double *propArrays,
 }
 
 
-#define CUBIC_SPLINE_LINEAR_SPACING 1
-#define CUBIC_SPLINE_LOG10_SPACING 2
-#define CUBIC_SPLINE_GENERAL_SPACING 3 
-
-CUDA_CALLABLE_MEMBER
+CUDA_DEVICE
 int CubicSpline::get_window(double x_new, int spline_index)
 {
     int window = 0;
     // TODO: switch statement
+    // TODO: MAKE FASTER
     if (spline_type == CUBIC_SPLINE_LINEAR_SPACING)
     {
         window = int(x_new / (x0[spline_index * length + 1] - x0[spline_index * length + 0]));
@@ -375,7 +372,7 @@ int CubicSpline::get_window(double x_new, int spline_index)
     else
     {
 #ifdef __CUDACC__
-        printf("BAD cubic spline type. (%d)\n", spline_type);
+        // printf("BAD cubic spline type. (%d)\n", spline_type);
 #else
         std::string error_str = "BAD cubic spline type. (" + std::to_string(spline_type) + ")"; 
         throw std::invalid_argument(error_str);
@@ -385,7 +382,7 @@ int CubicSpline::get_window(double x_new, int spline_index)
     if ((window < 0) || (window >= length))
     {
 #ifdef __CUDACC__
-        printf("Outside spline. Using edge value.");
+        // printf("Outside spline. Using edge value.");
         if (window < 0) window = 0;
         if (window >= length) window = length - 1;
 #else
@@ -397,14 +394,17 @@ int CubicSpline::get_window(double x_new, int spline_index)
     return window;
 }
 
-CUDA_CALLABLE_MEMBER
+CUDA_DEVICE
 CubicSplineSegment CubicSpline::get_cublic_spline_segment(double x_new, int spline_index)
 {
     int window = get_window(x_new, spline_index); 
     if (window == -2)
     {
       // printf("OUTSIDE: %e %e %e %d %d %d\n", x_new, x0[spline_index * length], x0[spline_index * length + length - 1], window, length, spline_index);
+#ifdef __CUDACC__
+#else
       throw std::invalid_argument("BAD.");
+#endif
     }    
     int _index = spline_index * length + window; 
     CubicSplineSegment segment(x0[_index], y0[_index], c1[_index], c2[_index], c3[_index], spline_type);
@@ -412,7 +412,7 @@ CubicSplineSegment CubicSpline::get_cublic_spline_segment(double x_new, int spli
 }
 
 
-CUDA_CALLABLE_MEMBER
+CUDA_DEVICE
 double CubicSpline::eval_single(double x_new, int spline_index)
 {
     CubicSplineSegment segment = get_cublic_spline_segment(x_new, spline_index);
@@ -420,17 +420,49 @@ double CubicSpline::eval_single(double x_new, int spline_index)
 }
 
 
-CUDA_CALLABLE_MEMBER
+CUDA_DEVICE
 void CubicSpline::eval(double *y_new, double *x_new, int *spline_index, int N)
 {
-
-    for (int i = 0; i < N; i += 1)
+#ifdef __CUDACC__
+  int start1 = threadIdx.x + blockIdx.x * blockDim.x;
+  int diff1 = gridDim.x * blockDim.x;
+#else
+  int start1 = 0;
+  int diff1 = 1;
+#endif
+    for (int i = start1; i < N; i += diff1)
     {
         y_new[i] = eval_single(x_new[i], spline_index[i]);
     }
 }
 
-CUDA_CALLABLE_MEMBER
+CUDA_KERNEL
+void eval_kernel(CubicSpline *spline, double *y_new, double *x_new, int *spline_index, int N)
+{
+    spline->eval(y_new, x_new, spline_index, N);
+}
+
+void eval_wrap(CubicSpline *spline, double *y_new, double *x_new, int *spline_index, int N)
+{
+#ifdef __CUDACC__
+    int nblocks = std::ceil((N + NUM_THREADS_INTERPOLATE - 1) / NUM_THREADS_INTERPOLATE);
+    
+    // copy this class to device
+    CubicSpline *d_spline;
+    gpuErrchk(cudaMalloc(&d_spline, sizeof(CubicSpline)));
+    gpuErrchk(cudaMemcpy(d_spline, spline, sizeof(CubicSpline), cudaMemcpyHostToDevice));
+    
+    eval_kernel<<<nblocks, NUM_THREADS_INTERPOLATE>>>(d_spline, y_new, x_new, spline_index, N);
+    cudaDeviceSynchronize();
+    gpuErrchk(cudaGetLastError());
+    gpuErrchk(cudaFree(d_spline));
+    
+#else
+    spline->eval(y_new, x_new, spline_index, N);
+#endif
+}
+
+CUDA_DEVICE
 int CubicSpline::even_sampled_search(double *array, int nmin, int nmax, double x) {
     // TODO: adjust this. At specialized gpu array searching. 
     double dx = array[1] - array[0];
@@ -440,7 +472,7 @@ int CubicSpline::even_sampled_search(double *array, int nmin, int nmax, double x
 // Recursive binary search function.
 // Return nearest smaller neighbor of x in array[nmin,nmax] is present,
 // otherwise -1
-CUDA_CALLABLE_MEMBER
+CUDA_DEVICE
 int CubicSpline::binary_search(double *array, int nmin, int nmax, double x)
 {
     // catch if x exactly matches array[nmin]

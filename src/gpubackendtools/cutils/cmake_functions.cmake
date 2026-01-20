@@ -148,9 +148,11 @@ endfunction()
 # * GBT_LAPACKE_LIBS: list of libraries to link against to use LAPACKE
 # * GBT_LAPACKE_GET_SUCCESS: ON
 # * GBT_LAPACKE_GET_STRATEGY: strategy that succeeded (PKGCONFIG|CMAKE|FETCH )
-function(get_lapacke)
+function(get_lapacke) #detect_with fetch)
   # cmake-lint: disable=R0912,R0915
   message(CHECK_START "Locating LAPACKE")
+  #set(GBT_LAPACKE_DETECT_WITH detect_with)
+  #set(GBT_LAPACKE_FETCH fetch)
 
   if (NOT ${GBT_LAPACKE_DETECT_WITH} AND NOT ${GBT_LAPACKE_FETCH})
     set(${GBT_LAPACKE_DETECT_WITH} "AUTO")
@@ -322,14 +324,13 @@ function(apply_cpu_backend_common_options libname pkg_name pkg_install is_static
     PROPERTY LIBRARY_OUTPUT_DIRECTORY
              "${BACKEND_BASE_OUTPUT_DIRECTORY}/${pkg_name}_backend_cpu")
   set_property(TARGET ${target_name} PROPERTY OUTPUT_NAME ${libname})
-
+  set_property(TARGET ${target_name} PROPERTY POSITION_INDEPENDENT_CODE TRUE)
   install(TARGETS ${target_name} DESTINATION "${pkg_name}_backend_cpu")
 
   get_target_property(GBT_CXX_MARCH_OPT ${pkg_install} CXX_MARCH)
   if(GBT_CXX_MARCH_OPT)
     target_compile_options(${target_name} PRIVATE "${GBT_CXX_MARCH_OPT}")
   endif()
-
   target_include_directories(${target_name} PRIVATE ${Python_NumPy_INCLUDE_DIR})
   target_compile_definitions(${target_name}
                              PRIVATE NPY_NO_DEPRECATED_API=NPY_1_9_API_VERSION)

@@ -42,7 +42,7 @@ class CubicSplineWrap {
     ~CubicSplineWrap(){
         delete spline;
     };
-    void eval_wrap(array_type<double>y_new, array_type<double>x_new, array_type<int>spline_index, int N);
+    void eval_wrap_func(array_type<double>y_new, array_type<double>x_new, array_type<int>spline_index, int N);
     template<typename T>
     static T* return_pointer_and_check_length(array_type<T> input1, std::string name, int N, int multiplier)
     {

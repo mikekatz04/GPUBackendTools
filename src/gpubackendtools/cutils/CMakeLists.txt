@@ -71,10 +71,17 @@ endif()
 
 # III. Declare the GPU backend
 if(GBT_WITH_GPU)
-  python_add_library(gpubackendtools_gpu_interp MODULE WITH_SOABI interp.cxx
-                     Interpolate.cu)
+  add_library(gpubackendtools_gpu_interp_gpu_static STATIC Interpolate.cu)
+  apply_gpu_backend_common_options(interp_gpu gbt gpubackendtools true)
+  # target_include_directories(gpubackendtools_gpu_interp_gpu_static PUBLIC ${GBT_CUTILS})
+  target_sources(gpubackendtools_gpu_interp_gpu_static PUBLIC FILE_SET HEADERS FILES
+                                        Interpolate.hh)
+  
+  pybind11_add_module(gpubackendtools_gpu_interp gbt_binding.cxx)
   apply_gpu_backend_common_options(interp gbt gpubackendtools false)
-  target_sources(
-    gpubackendtools_gpu_interp PUBLIC FILE_SET HEADERS FILES cuda_complex.hpp gbt_global.h
-                            Interpolate.hh)
+  target_link_libraries(gpubackendtools_gpu_interp PRIVATE gpubackendtools_gpu_interp_gpu_static)
+  # target_include_directories(gpubackendtools_gpu_interp PUBLIC ${GBT_CUTILS})
+  target_sources(gpubackendtools_gpu_interp PUBLIC FILE_SET HEADERS FILES
+                                      gbt_binding.hpp)
+
 endif()

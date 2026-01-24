@@ -341,7 +341,7 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
             y_new[~(bool1 & bool2)] = 0.0
 
         if hasattr(self.xp, "cuda"):
-            self.xp.get_default_memory_pool().free_all_block()
+            self.xp.get_default_memory_pool().free_all_blocks()
         return y_new.reshape(input_shape)
     
     def interp_special(self, x_new, inds):

@@ -42,7 +42,7 @@ set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_WITH_GPU)
 # GBT_CUDA_ARCH will be passed as the CUDA_ARCHITECTURES property for the CUDA
 # backend if it is compiled. See the documentation of CUDA_ARCHITECTURES:
 # https://cmake.org/cmake/help/latest/prop_tgt/CUDA_ARCHITECTURES.html
-set(GBT_CUDA_ARCH 80  #"native"
+set(GBT_CUDA_ARCH "native"
     CACHE STRING "CUDA Architecture targetted for GBT compilation (see doc of \
           CMAKE_CUDA_ARCHITECTURES).")
 set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_CUDA_ARCH)
@@ -75,7 +75,7 @@ set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_LAPACKE_DETECT_WITH)
 # * ON: will always fetch LAPACKE sources and compile them, even if already
 #   present locally
 # * OFF: will disable LAPACKE fetching mechanism
-set(GBT_LAPACKE_FETCH "AUTO" CACHE STRING
+set(GBT_LAPACKE_FETCH "ON" CACHE STRING
                                    "Whether to download and compile LAPACK(E)")
 set_property(CACHE GBT_LAPACKE_FETCH PROPERTY STRINGS "AUTO" "ON" "OFF")
 set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_LAPACKE_FETCH)

@@ -160,7 +160,6 @@ public:
     double eval_single(double x_new, int spline_index);
     CUDA_DEVICE
     void eval(double *y_new, double *x_new, int *spline_index, int N);
-    void eval_wrap(double *y_new, double *x_new, int *spline_index, int N);
     CUDA_DEVICE
     void dealloc(){};
     CUDA_DEVICE

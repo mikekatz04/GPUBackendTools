@@ -366,14 +366,14 @@ function(apply_gpu_backend_common_options libname pkg_name pkg_install is_static
     PROPERTY LIBRARY_OUTPUT_DIRECTORY
              "${BACKEND_BASE_OUTPUT_DIRECTORY}/${backend_name}")
   set_property(TARGET ${target_name} PROPERTY OUTPUT_NAME ${libname})
-
+  #find_package(CUB REQUIRED)
   install(TARGETS ${target_name} DESTINATION ${backend_name})
 
   target_include_directories(${target_name} PRIVATE ${Python_NumPy_INCLUDE_DIR})
   target_compile_definitions(${target_name}
                              PRIVATE NPY_NO_DEPRECATED_API=NPY_1_9_API_VERSION)
   target_link_libraries(${target_name} PUBLIC CUDA::cudart CUDA::cublas
-                                              CUDA::cusparse)
+                                              CUDA::cusparse) # CUB::CUB)
   set_property(TARGET ${target_name} PROPERTY CUDA_ARCHITECTURES
                                               ${HERE_CUDA_ARCH})
   

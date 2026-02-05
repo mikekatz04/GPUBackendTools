@@ -307,7 +307,7 @@ function(apply_cpu_backend_common_options libname pkg_name pkg_install is_static
   if(GBT_CXX_MARCH_OPT)
     target_compile_options(${target_name} PRIVATE "${GBT_CXX_MARCH_OPT}")
   endif()
-
+  target_compile_options(${target_name} PRIVATE -mno-avx512f)
   target_include_directories(${target_name} PRIVATE ${Python_NumPy_INCLUDE_DIR})
   target_compile_definitions(${target_name}
                              PRIVATE NPY_NO_DEPRECATED_API=NPY_1_9_API_VERSION)

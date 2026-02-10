@@ -329,7 +329,10 @@ function(apply_cpu_backend_common_options libname pkg_name pkg_install is_static
   if(GBT_CXX_MARCH_OPT)
     target_compile_options(${target_name} PRIVATE "${GBT_CXX_MARCH_OPT}")
   endif()
-  target_compile_options(${target_name} PRIVATE -mno-avx512f)
+
+  if (NOT ${APPLE})
+    target_compile_options(${target_name} PRIVATE -mno-avx512f)
+  endif()
   target_include_directories(${target_name} PRIVATE ${Python_NumPy_INCLUDE_DIR})
   target_compile_definitions(${target_name}
                              PRIVATE NPY_NO_DEPRECATED_API=NPY_1_9_API_VERSION)
@@ -380,5 +383,6 @@ function(apply_gpu_backend_common_options libname pkg_name pkg_install is_static
   set_property(TARGET ${target_name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
   set_property(TARGET ${target_name} PROPERTY POSITION_INDEPENDENT_CODE ON)  # -fPic
   target_compile_definitions(${target_name} PUBLIC __CUDA_COMPILATION__) 
+  set_target_properties(${target_name} PROPERTIES LINKER_LANGUAGE CUDA)
 
 endfunction()

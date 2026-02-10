@@ -329,7 +329,6 @@ function(apply_cpu_backend_common_options libname pkg_name pkg_install is_static
   if(GBT_CXX_MARCH_OPT)
     target_compile_options(${target_name} PRIVATE "${GBT_CXX_MARCH_OPT}")
   endif()
-
   if (NOT ${APPLE})
     target_compile_options(${target_name} PRIVATE -mno-avx512f)
   endif()

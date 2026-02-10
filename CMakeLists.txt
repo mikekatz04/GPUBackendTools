@@ -75,7 +75,7 @@ set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_LAPACKE_DETECT_WITH)
 # * ON: will always fetch LAPACKE sources and compile them, even if already
 #   present locally
 # * OFF: will disable LAPACKE fetching mechanism
-set(GBT_LAPACKE_FETCH "ON" CACHE STRING
+set(GBT_LAPACKE_FETCH "AUTO" CACHE STRING
                                    "Whether to download and compile LAPACK(E)")
 set_property(CACHE GBT_LAPACKE_FETCH PROPERTY STRINGS "AUTO" "ON" "OFF")
 set_property(GLOBAL APPEND PROPERTY GBT_OPTION_NAMES GBT_LAPACKE_FETCH)

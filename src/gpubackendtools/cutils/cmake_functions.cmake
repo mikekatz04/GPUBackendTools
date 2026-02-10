@@ -148,11 +148,9 @@ endfunction()
 # * GBT_LAPACKE_LIBS: list of libraries to link against to use LAPACKE
 # * GBT_LAPACKE_GET_SUCCESS: ON
 # * GBT_LAPACKE_GET_STRATEGY: strategy that succeeded (PKGCONFIG|CMAKE|FETCH )
-function(get_lapacke) #detect_with fetch)
+function(get_lapacke) 
   # cmake-lint: disable=R0912,R0915
   message(CHECK_START "Locating LAPACKE")
-  #set(GBT_LAPACKE_DETECT_WITH detect_with)
-  #set(GBT_LAPACKE_FETCH fetch)
 
   if (NOT ${GBT_LAPACKE_DETECT_WITH} AND NOT ${GBT_LAPACKE_FETCH})
     set(${GBT_LAPACKE_DETECT_WITH} "AUTO")

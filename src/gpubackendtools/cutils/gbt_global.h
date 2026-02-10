@@ -12,8 +12,8 @@
 #define CUDA_SYNC_THREADS __syncthreads();
 #define THREAD_ZERO (threadIdx.x == 0)
 #define THREAD_START threadIdx.x
-#define BLOCK_START blockIdx.x
 #define BLOCK_INCR blockDim.x
+#define BLOCK_START blockIdx.x
 #define GRID_INCR gridDim.x
 
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
@@ -33,10 +33,12 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 #define CUDA_SYNC_THREADS
 #define THREAD_ZERO (true)
 #define THREAD_START 0
-#define BLOCK_START 0
 #define BLOCK_INCR 1
+#define BLOCK_START 0
 #define GRID_INCR 1
+
 #endif
+
 
 typedef gcmplx::complex<double> cmplx;
 

@@ -268,7 +268,7 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         self._cpp_class = self.backend.CubicSplineWrap(*self.cpp_class_args)
         return self._cpp_class
     
-    def __call__(self, x_new, ind_interps = None, use_c_backend=False, error_out_of_bounds = True):
+    def __call__(self, x_new, ind_interps = None, use_c_backend=False, error_out_of_bounds = True, derivative=0):
         
         if use_c_backend:
             raise NotImplementedError
@@ -334,7 +334,16 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
 
         dx = x_new - x0
 
-        y_new = y0 + c1 * dx + c2 * dx**2 + c3 * dx**3
+        if derivative == 0:
+            y_new = y0 + c1 * dx + c2 * dx**2 + c3 * dx**3
+        elif derivative == 1:
+            y_new = c1 + 2 * c2 * dx + 3 * c3 * dx**2
+        elif derivative == 2:
+            y_new = 2 * c2 + 6 * c3 * dx
+        elif derivative == 3:
+            y_new = 6 * c3
+        else:
+            raise ValueError("Invalid derivative order.")
 
         if fix:
             warnings.warn("New x array contains values outside domain of spline. Putting zeros outside domain.")

@@ -87,7 +87,7 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         y_all,
         ninterps=None,
         length=None,
-        spline_type=CUBIC_SPLINE_GENERAL_SPACING,
+        spline_type=None,
         force_backend=None,
     ):
 
@@ -148,6 +148,13 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         self.c3_flat = lower_diag = self.xp.zeros_like(B_flat)
         self.y_flat = y_all
         self.x_flat = x.copy()
+        
+        if self.xp.allclose((_diff := self.xp.diff(self.x, axis=-1)), _diff[..., 0][..., None]):
+            spline_type = CUBIC_SPLINE_LINEAR_SPACING
+        elif self.xp.allclose((_diff := self.xp.diff(self.xp.log10(self.x), axis=-1)), _diff[..., 0][..., None]):
+            spline_type = CUBIC_SPLINE_LOG10_SPACING
+        else:
+            spline_type = CUBIC_SPLINE_GENERAL_SPACING
 
         self.spline_type = spline_type
 

@@ -20,6 +20,10 @@ Backends
     :members:
     :show-inheritance:
 
+.. autoclass:: lisatools.sensitivity.Cuda13xBackend
+    :members:
+    :show-inheritance:
+
 .. autoclass:: lisatools.sensitivity.BackendManager
     :members:
     :show-inheritance:

@@ -396,7 +396,7 @@ def get_backend(backend_name: str) -> Backend:
     """
     if "cuda" in backend_name.split("_"):
         _base = backend_name.split("_")[0]
-        return get_first_backend([_base + "_cuda12x", _base + "_cuda11x"])
+        return get_first_backend([_base + "_cuda13x" , _base + "_cuda12x", _base + "_cuda11x"])
     if "gpu" in backend_name.split("_"):
         _base = backend_name.split("_")[0]
         return get_backend(_base + "_cuda")
@@ -408,11 +408,11 @@ def has_backend(backend_name: str) -> bool:
     """
     Test if a backend is available.
 
-    If the backend name is "cuda", return true if any of "cuda11x" or "cuda12x" is available.
+    If the backend name is "cuda", return true if any of "cuda11x" or "cuda12x" or "cuda13x" is available.
     If the backend name is "gpu", return true if any GPU backend is available.
     """
     if backend_name == "cuda":
-        return has_backend("cuda11x") or has_backend("cuda12x")
+        return has_backend("cuda11x") or has_backend("cuda12x") or has_backend("cuda13x")
     if backend_name == "gpu":
         return has_backend("cuda")
     return Globals().backends_manager.has_backend(backend_name=backend_name)

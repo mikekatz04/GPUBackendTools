@@ -241,10 +241,7 @@ class _CudaBackend(Backend):
             ) from e
 
         try:
-            cupy_cuda_ver = cupy.cuda.get_local_runtime_version() // 1000
-        except AttributeError:
-            print("NEED TO REMOVE")
-            cupy_cuda_ver = 12
+            cupy_cuda_ver = cupy.cuda.runtime.runtimeGetVersion() // 1000
         except RuntimeError as e:
             raise SoftwareException("CuPy could not detect runtime version") from e
 
@@ -559,6 +556,84 @@ class Cuda12xBackend(_CudaBackend, abc.ABC):
             cuda_max=(13, 0),
             module_loader=self.__class__.cuda12x_module_loader,
             dynlib_loader=self.__class__.cuda12x_dynlib_loader,
+        )
+        Feature = Backend.Feature
+
+        super().__init__(
+            name=name,
+            methods=methods,
+            features=Feature.CUPY | Feature.CUDA | Feature.GPU,
+        )
+        
+        
+class Cuda13xBackend(_CudaBackend, abc.ABC):
+    """Implementation of CUDA 13.x backend"""
+
+    @staticmethod
+    @abc.abstractmethod
+    def cuda13x_module_loader():
+        raise NotImplementedError
+
+    @staticmethod
+    def cuda13x_dynlib_loader():
+        import sys
+
+        if sys.platform == "linux":
+            cuda13x_solibs = [
+                _CudaBackend.NvidiaSoLib(
+                    soname="libcudart.so.13",
+                    module_name="cuda_runtime",
+                    pip_pkg="nvidia-cuda-runtime-cu13",
+                    conda_pkg=None,
+                ),
+                _CudaBackend.NvidiaSoLib(
+                    soname="libcublas.so.13",
+                    module_name="cublas",
+                    pip_pkg="nvidia-cublas-cu13",
+                    conda_pkg=None,
+                ),
+                _CudaBackend.NvidiaSoLib(
+                    soname="libnvJitLink.so.13",
+                    module_name="nvjitlink",
+                    pip_pkg="nvidia-nvjitlink-cu13",
+                    conda_pkg=None,
+                ),
+                _CudaBackend.NvidiaSoLib(
+                    soname="libcusparse.so.13",
+                    module_name="cusparse",
+                    pip_pkg="nvidia-cusparse-cu13",
+                    conda_pkg=None,
+                ),
+                _CudaBackend.NvidiaSoLib(
+                    soname="libnvrtc.so.13",
+                    module_name="cuda_nvrtc",
+                    pip_pkg="nvidia-cuda-nvrtc-cu13",
+                    conda_pkg=None,
+                ),
+                # TODO: check this
+                # _CudaBackend.NvidiaSoLib(
+                #     soname="libcufftw.so.13",
+                #     module_name="cufft",
+                #     pip_pkg="nvidia-cufft-cu13",
+                #     conda_pkg=None,
+                # ),
+            ]
+            _CudaBackend._try_import_nvidia_solib(cuda13x_solibs)
+
+    def __init__(self):
+        """Initialize the CPU backend"""
+
+        if self.backend_name is None:
+            raise ValueError("Child class must declare `backend_name` class attribute.")
+
+        name = "cuda13x"
+        methods = self.check_cuda_backend(
+            name=name,
+            backend_module_name=self.backend_name,
+            cuda_min=(13, 0),
+            cuda_max=(14, 0),
+            module_loader=self.__class__.cuda13x_module_loader,
+            dynlib_loader=self.__class__.cuda13x_dynlib_loader,
         )
         Feature = Backend.Feature
 

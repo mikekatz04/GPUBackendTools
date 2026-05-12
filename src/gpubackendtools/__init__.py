@@ -36,12 +36,13 @@ from .pointeradjust import wrapper, pointer_adjust
 from .parallelbase import ParallelModuleBase
 
 from .globals import Globals
-from .cutils import GBTCpuBackend, GBTCuda11xBackend, GBTCuda12xBackend
+from .cutils import GBTCpuBackend, GBTCuda11xBackend, GBTCuda12xBackend, GBTCuda13xBackend
 
 add_backends = {
     "gbt_cpu": GBTCpuBackend,
     "gbt_cuda11x": GBTCuda11xBackend,
     "gbt_cuda12x": GBTCuda12xBackend,
+    "gbt_cuda13x": GBTCuda13xBackend,
 }
 
 Globals().backends_manager.add_backends(add_backends)

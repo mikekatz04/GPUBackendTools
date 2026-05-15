@@ -83,12 +83,12 @@ class CubicSplineTest(unittest.TestCase):
 
     def test_cubic_spline_c_backend(self):
         force_backend = "cpu" if not gpu_available else "gpu"
-        xp = cp if gpu_availble else np        
+        xp = cp if gpu_available else np
         N = 1000
         _x = np.linspace(0.0, 1.0, N)
         x_in = np.tile(_x, (2, 2, 1))
         y_in = np.tile((_x ** 3 + _x ** 2 + _x ** 1 + _x), (2, 2, 1))
-        
+
         spl_scipy = CubicSpline_scipy(x_in[0, 0], y_in[0, 0])
 
         our_spl = CubicSplineInterpolant(xp.asarray(x_in), xp.asarray(y_in), force_backend=force_backend)
@@ -102,3 +102,54 @@ class CubicSplineTest(unittest.TestCase):
         if gpu_available:
             _y_new = _y_new.get()
         self.assertTrue(np.allclose(_y_new, scipy_check))
+
+
+class SingleSplineFitTest(unittest.TestCase):
+    """Test the per-spline Thomas and PCR device functions exposed via pybind11.
+
+    Each fit function fills (c1, c2, c3) in place from (x, y); we evaluate the
+    resulting piecewise cubic at a grid of new points and compare against
+    scipy's not-a-knot CubicSpline.
+    """
+
+    @staticmethod
+    def _evaluate(x_new, x, y, c1, c2, c3, xp):
+        inds = xp.searchsorted(x, x_new, side="right") - 1
+        inds = xp.clip(inds, 0, len(x) - 2)
+        dx = x_new - x[inds]
+        return y[inds] + c1[inds] * dx + c2[inds] * dx ** 2 + c3[inds] * dx ** 3
+
+    def _run_fit_and_compare(self, fit_func, xp, atol=1e-9):
+        N = 128
+        x_np = np.linspace(0.0, 1.0, N)
+        y_np = x_np ** 3 + x_np ** 2 + x_np + 1.0
+
+        x = xp.asarray(x_np)
+        y = xp.asarray(y_np)
+        c1 = xp.zeros(N, dtype=np.float64)
+        c2 = xp.zeros(N, dtype=np.float64)
+        c3 = xp.zeros(N, dtype=np.float64)
+        B = xp.zeros(N, dtype=np.float64)
+
+        fit_func(x, y, c1, c2, c3, B, N, CUBIC_SPLINE_LINEAR_SPACING)
+
+        x_new_np = np.linspace(x_np[0] + 1e-6, x_np[-1] - 1e-6, 5000)
+        scipy_y = CubicSpline_scipy(x_np, y_np)(x_new_np)
+
+        x_new = xp.asarray(x_new_np)
+        our_y = self._evaluate(x_new, x, y, c1, c2, c3, xp)
+        if hasattr(our_y, "get"):
+            our_y = our_y.get()
+
+        self.assertTrue(np.allclose(our_y, scipy_y, atol=atol))
+
+    def test_thomas_cpu(self):
+        from gpubackendtools import get_backend
+        backend = get_backend("gbt_cpu")
+        self._run_fit_and_compare(backend.fit_cubic_spline_thomas, np)
+
+    @unittest.skipUnless(gpu_available, "GPU not available")
+    def test_pcr(self):
+        from gpubackendtools import get_backend
+        backend = get_backend("gbt_gpu")
+        self._run_fit_and_compare(backend.fit_cubic_spline_pcr, cp)

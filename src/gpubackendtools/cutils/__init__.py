@@ -12,11 +12,15 @@ from ..exceptions import *
 @dataclasses.dataclass
 class GBTBackendMethods(BackendMethods):
     interpolate_wrap: typing.Callable[(...), None]
+    fit_cubic_spline_thomas: typing.Callable[(...), None]
+    fit_cubic_spline_pcr: typing.Optional[typing.Callable[(...), None]]
     CubicSplineWrap: object
     CubicSpline: object
 
 class GBTBackend:
     interpolate_wrap: typing.Callable[(...), None]
+    fit_cubic_spline_thomas: typing.Callable[(...), None]
+    fit_cubic_spline_pcr: typing.Optional[typing.Callable[(...), None]]
     CubicSplineWrap: object
     CubicSpline: object
 
@@ -27,6 +31,8 @@ class GBTBackend:
         assert isinstance(gbt_backend_methods, GBTBackendMethods)
 
         self.interpolate_wrap = gbt_backend_methods.interpolate_wrap
+        self.fit_cubic_spline_thomas = gbt_backend_methods.fit_cubic_spline_thomas
+        self.fit_cubic_spline_pcr = gbt_backend_methods.fit_cubic_spline_pcr
         self.CubicSplineWrap = gbt_backend_methods.CubicSplineWrap
         self.CubicSpline = gbt_backend_methods.CubicSpline
 
@@ -54,6 +60,8 @@ class GBTCpuBackend(CpuBackend, GBTBackend):
 
         return GBTBackendMethods(
             interpolate_wrap=gbt_backend_cpu.interp.interpolate_wrap,
+            fit_cubic_spline_thomas=gbt_backend_cpu.interp.fit_cubic_spline_thomas,
+            fit_cubic_spline_pcr=None,
             CubicSplineWrap=gbt_backend_cpu.interp.CubicSplineWrapCPU,
             CubicSpline=gbt_backend_cpu.interp.CubicSplineCPU,
             xp=numpy,
@@ -89,6 +97,8 @@ class GBTCuda11xBackend(Cuda11xBackend, GBTBackend):
 
         return GBTBackendMethods(
             interpolate_wrap=gbt_backend_cuda11x.interp.interpolate_wrap,
+            fit_cubic_spline_thomas=None,
+            fit_cubic_spline_pcr=gbt_backend_cuda11x.interp.fit_cubic_spline_pcr,
             CubicSplineWrap=gbt_backend_cuda11x.interp.CubicSplineWrapGPU,
             CubicSpline=gbt_backend_cuda11x.interp.CubicSplineGPU,
             xp=cupy,
@@ -122,6 +132,8 @@ class GBTCuda12xBackend(Cuda12xBackend, GBTBackend):
 
         return GBTBackendMethods(
             interpolate_wrap=gbt_backend_cuda12x.interp.interpolate_wrap,
+            fit_cubic_spline_thomas=None,
+            fit_cubic_spline_pcr=gbt_backend_cuda12x.interp.fit_cubic_spline_pcr,
             CubicSplineWrap=gbt_backend_cuda12x.interp.CubicSplineWrapGPU,
             CubicSpline=gbt_backend_cuda12x.interp.CubicSplineGPU,
             xp=cupy,
@@ -156,6 +168,8 @@ class GBTCuda13xBackend(Cuda13xBackend, GBTBackend):
 
         return GBTBackendMethods(
             interpolate_wrap=gbt_backend_cuda13x.interp.interpolate_wrap,
+            fit_cubic_spline_thomas=None,
+            fit_cubic_spline_pcr=gbt_backend_cuda13x.interp.fit_cubic_spline_pcr,
             CubicSplineWrap=gbt_backend_cuda13x.interp.CubicSplineWrapGPU,
             CubicSpline=gbt_backend_cuda13x.interp.CubicSplineGPU,
             xp=cupy,

@@ -45,6 +45,44 @@ void interpolate_wrap(array_type<double>x, array_type<double>propArrays,
     );
 }
 
+#if !defined(__CUDA_COMPILATION__) && !defined(__CUDACC__)
+// (CPU-only) Single-spline fit via Thomas algorithm.
+void fit_cubic_spline_thomas_wrap(array_type<double> x, array_type<double> y,
+                                  array_type<double> c1, array_type<double> c2, array_type<double> c3,
+                                  array_type<double> B,
+                                  int length, int spline_type)
+{
+    fit_cubic_spline_thomas_run(
+        CubicSplineWrap::return_pointer_and_check_length(x, "x", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(y, "y", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(c1, "c1", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(c2, "c2", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(c3, "c3", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(B, "B", length, 1),
+        length, spline_type
+    );
+}
+#endif
+
+#if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
+// (GPU-only) Single-spline fit via Parallel Cyclic Reduction.
+void fit_cubic_spline_pcr_wrap(array_type<double> x, array_type<double> y,
+                               array_type<double> c1, array_type<double> c2, array_type<double> c3,
+                               array_type<double> B,
+                               int length, int spline_type)
+{
+    fit_cubic_spline_pcr_run(
+        CubicSplineWrap::return_pointer_and_check_length(x, "x", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(y, "y", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(c1, "c1", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(c2, "c2", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(c3, "c3", length, 1),
+        CubicSplineWrap::return_pointer_and_check_length(B, "B", length, 1),
+        length, spline_type
+    );
+}
+#endif
+
 
 std::string get_module_path_gbt() {
     // Acquire the GIL if it's not already held (safe to call multiple times)
@@ -113,6 +151,14 @@ PYBIND11_MODULE(interp, m) {
     m.def("check_spline", &check_spline, "Make sure that we can insert spline properly.");
     m.def("get_module_path_cpp", &get_module_path_gbt, "Returns the file path of the module");
     m.def("interpolate_wrap", &interpolate_wrap, "Interpolate arrays.");
+#if !defined(__CUDA_COMPILATION__) && !defined(__CUDACC__)
+    m.def("fit_cubic_spline_thomas", &fit_cubic_spline_thomas_wrap,
+          "(CPU-only) Fit a single cubic spline via the Thomas algorithm (in place; fills c1, c2, c3).");
+#endif
+#if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
+    m.def("fit_cubic_spline_pcr", &fit_cubic_spline_pcr_wrap,
+          "(GPU-only) Fit a single cubic spline via Parallel Cyclic Reduction (in place; fills c1, c2, c3).");
+#endif
     // Optionally, get the path during module initialization and store it
     // This can cause an AttributeError if not handled carefully, as m.attr("__file__")
     // might not be fully set during the initial call if the module is loaded in

@@ -446,21 +446,203 @@ void eval_wrap(CubicSpline *spline, double *y_new, double *x_new, int *spline_in
 {
 #ifdef __CUDACC__
     int nblocks = std::ceil((N + NUM_THREADS_INTERPOLATE - 1) / NUM_THREADS_INTERPOLATE);
-    
+
     // copy this class to device
     CubicSpline *d_spline;
     gpuErrchk(cudaMalloc(&d_spline, sizeof(CubicSpline)));
     gpuErrchk(cudaMemcpy(d_spline, spline, sizeof(CubicSpline), cudaMemcpyHostToDevice));
-    
+
     eval_kernel<<<nblocks, NUM_THREADS_INTERPOLATE>>>(d_spline, y_new, x_new, spline_index, N);
     cudaDeviceSynchronize();
     gpuErrchk(cudaGetLastError());
     gpuErrchk(cudaFree(d_spline));
-    
+
 #else
     spline->eval(y_new, x_new, spline_index, N);
 #endif
 }
+
+#ifndef __CUDACC__
+
+CubicSpline fit_cubic_spline_thomas(double *x, double *y,
+                                    double *c1, double *c2, double *c3,
+                                    double *B,
+                                    int length, int spline_type)
+{
+    // 1. Fill the not-a-knot tridiagonal system: B is the rhs, c1 / c2 / c3
+    //    double as upper / main / lower diagonals. prep_splines uses
+    //    interp_i*length + i indexing; with interp_i = 0 the offsets reduce
+    //    to plain `i`, so we treat the inputs as a single-row layout.
+    for (int i = 0; i < length; ++i)
+    {
+        prep_splines(i, length, /*interp_i=*/0, /*ninterps=*/1,
+                     B, c1, c2, c3, x, y);
+    }
+
+    // 2. Thomas tridiagonal sweep, in place. c2 is the working main diagonal;
+    //    B becomes the dy/dx solution vector on exit.
+    for (int i = 1; i < length; ++i)
+    {
+        double w = c3[i] / c2[i - 1];
+        c2[i] -= w * c1[i - 1];
+        B[i]  -= w * B[i - 1];
+    }
+    B[length - 1] /= c2[length - 1];
+    for (int i = length - 2; i >= 0; --i)
+    {
+        B[i] = (B[i] - c1[i] * B[i + 1]) / c2[i];
+    }
+
+    // 3. Convert derivatives in B into the final spline coefficients. This
+    //    overwrites c1, c2, c3 — the diagonals are no longer needed.
+    for (int i = 0; i < length - 1; ++i)
+    {
+        fill_coefficients(i, length, /*interp_i=*/0, /*ninterps=*/1,
+                          B, x, y, c1, c2, c3);
+    }
+
+    return CubicSpline(x, y, c1, c2, c3, /*ninterps=*/1, length, spline_type);
+}
+
+void fit_cubic_spline_thomas_run(double *x, double *y,
+                                 double *c1, double *c2, double *c3,
+                                 double *B,
+                                 int length, int spline_type)
+{
+    fit_cubic_spline_thomas(x, y, c1, c2, c3, B, length, spline_type);
+}
+
+#endif // !__CUDACC__
+
+#ifdef __CUDACC__
+
+CUDA_KERNEL
+void fit_cubic_spline_pcr_launch(double *x, double *y,
+                                 double *c1, double *c2, double *c3,
+                                 double *B,
+                                 int length, int spline_type)
+{
+    extern __shared__ double pcr_smem[];
+    fit_cubic_spline_pcr(x, y, c1, c2, c3, B, pcr_smem, length, spline_type);
+}
+
+void fit_cubic_spline_pcr_run(double *x, double *y,
+                              double *c1, double *c2, double *c3,
+                              double *B,
+                              int length, int spline_type)
+{
+    int threads = (length < NUM_THREADS_INTERPOLATE) ? length : NUM_THREADS_INTERPOLATE;
+    if (threads < 1) threads = 1;
+    size_t shared_bytes = (size_t)8 * (size_t)length * sizeof(double);
+    fit_cubic_spline_pcr_launch<<<1, threads, shared_bytes>>>(x, y, c1, c2, c3, B, length, spline_type);
+    cudaDeviceSynchronize();
+    gpuErrchk(cudaGetLastError());
+}
+
+CUDA_DEVICE
+CubicSpline fit_cubic_spline_pcr(double *x, double *y,
+                                 double *c1, double *c2, double *c3,
+                                 double *B,
+                                 double *pcr_scratch,
+                                 int length, int spline_type)
+{
+    // Lay out the caller-provided scratch as four (a, b, c, d) ping-pong
+    // pairs. Each "buffer" is `length` doubles; src indexes the current
+    // state, dst receives the next reduction step, and we swap each
+    // iteration.
+    double *a_buf[2] = { pcr_scratch + 0 * length, pcr_scratch + 1 * length };
+    double *b_buf[2] = { pcr_scratch + 2 * length, pcr_scratch + 3 * length };
+    double *c_buf[2] = { pcr_scratch + 4 * length, pcr_scratch + 5 * length };
+    double *d_buf[2] = { pcr_scratch + 6 * length, pcr_scratch + 7 * length };
+
+    // 1. Build the tridiagonal system. prep_splines writes the rhs into B
+    //    and the upper / main / lower diagonals into c1 / c2 / c3 (with
+    //    interp_i = 0, ninterps = 1 the offsets reduce to plain `i`).
+    for (int i = threadIdx.x; i < length; i += blockDim.x)
+    {
+        prep_splines(i, length, /*interp_i=*/0, /*ninterps=*/1,
+                     B, c1, c2, c3, x, y);
+    }
+    __syncthreads();
+
+    // 2. Stage into the scratch ping-pong. a = c3 (lower), b = c2 (diag),
+    //    c = c1 (upper), d = B (rhs).
+    int src = 0, dst = 1;
+    for (int i = threadIdx.x; i < length; i += blockDim.x)
+    {
+        a_buf[src][i] = c3[i];
+        b_buf[src][i] = c2[i];
+        c_buf[src][i] = c1[i];
+        d_buf[src][i] = B[i];
+    }
+    __syncthreads();
+
+    // 3. PCR sweep. At step k each row i is recombined with rows i ± stride
+    //    (stride = 2^(k-1)) to eliminate x_{i±stride}. Stride doubles each
+    //    iteration; once stride >= length both neighbors are out of bounds
+    //    and the system is fully decoupled, giving x_i = d_i / b_i.
+    for (int stride = 1; stride < length; stride <<= 1)
+    {
+        for (int i = threadIdx.x; i < length; i += blockDim.x)
+        {
+            double a_i = a_buf[src][i];
+            double b_i = b_buf[src][i];
+            double c_i = c_buf[src][i];
+            double d_i = d_buf[src][i];
+
+            int im = i - stride;
+            int ip = i + stride;
+
+            double alpha = 0.0, beta = 0.0;
+            double am = 0.0, cm = 0.0, dm = 0.0;
+            double ap = 0.0, cp = 0.0, dp = 0.0;
+
+            if (im >= 0)
+            {
+                am = a_buf[src][im];
+                cm = c_buf[src][im];
+                dm = d_buf[src][im];
+                alpha = -a_i / b_buf[src][im];
+            }
+            if (ip < length)
+            {
+                ap = a_buf[src][ip];
+                cp = c_buf[src][ip];
+                dp = d_buf[src][ip];
+                beta = -c_i / b_buf[src][ip];
+            }
+
+            a_buf[dst][i] = alpha * am;
+            b_buf[dst][i] = b_i + alpha * cm + beta * ap;
+            c_buf[dst][i] = beta * cp;
+            d_buf[dst][i] = d_i + alpha * dm + beta * dp;
+        }
+        __syncthreads();
+
+        int tmp = src;
+        src = dst;
+        dst = tmp;
+    }
+
+    // 4. Decoupled solve. Write dy/dx solution back to B.
+    for (int i = threadIdx.x; i < length; i += blockDim.x)
+    {
+        B[i] = d_buf[src][i] / b_buf[src][i];
+    }
+    __syncthreads();
+
+    // 5. Convert derivatives in B into the final spline coefficients.
+    for (int i = threadIdx.x; i < length - 1; i += blockDim.x)
+    {
+        fill_coefficients(i, length, /*interp_i=*/0, /*ninterps=*/1,
+                          B, x, y, c1, c2, c3);
+    }
+    __syncthreads();
+
+    return CubicSpline(x, y, c1, c2, c3, /*ninterps=*/1, length, spline_type);
+}
+
+#endif // __CUDACC__
 
 CUDA_DEVICE
 int CubicSpline::even_sampled_search(double *array, int nmin, int nmax, double x) {

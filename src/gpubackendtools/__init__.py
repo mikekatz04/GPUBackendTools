@@ -45,6 +45,15 @@ add_backends = {
     "gbt_cuda13x": GBTCuda13xBackend,
 }
 
+# Pure-JAX backend (subpackage gated on `import jax`). Optional --
+# users without JAX keep working with just the C++/CUDA backends.
+try:
+    from .jax import GBTJaxBackend as _GBTJaxBackend
+    if _GBTJaxBackend is not None:
+        add_backends["gbt_jax"] = _GBTJaxBackend
+except (ImportError, ModuleNotFoundError):
+    pass
+
 Globals().backends_manager.add_backends(add_backends)
 
 

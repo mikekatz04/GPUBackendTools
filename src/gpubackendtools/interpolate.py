@@ -143,12 +143,9 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         # setup all arrays for interpolation
         x_flat = self.xp.asarray(x)
         B_flat = self.xp.zeros((self.ninterps * self.length,))
-        self.c1_flat = upper_diag = self.xp.zeros_like(B_flat)
-        self.c2_flat = diag = self.xp.zeros_like(B_flat)
-        self.c3_flat = lower_diag = self.xp.zeros_like(B_flat)
         self.y_flat = y_all
-        self.x_flat = x.copy()
-        
+        self.x_flat = x.copy() if hasattr(x, "copy") else x
+
         if self.xp.allclose((_diff := self.xp.diff(self.x, axis=-1)), _diff[..., 0][..., None]):
             spline_type = CUBIC_SPLINE_LINEAR_SPACING
         elif self.xp.allclose((_diff := self.xp.diff(self.xp.log10(self.x), axis=-1)), _diff[..., 0][..., None]):
@@ -164,17 +161,34 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         elif spline_type == CUBIC_SPLINE_LOG10_SPACING:
             assert self.xp.allclose(self.xp.diff(self.xp.log10(self.x_interp_shape), axis=-1), self.xp.diff(self.xp.log10(self.x_interp_shape), axis=-1)[:, 0][:, None])
 
-        # perform interpolation
-        self.interpolate_arrays(
-            self.x_flat,
-            self.y_flat,
-            B_flat,
-            upper_diag,
-            diag,
-            lower_diag,
-            self.length,
-            self.ninterps,
-        )
+        # Backend split: the C++ backends use in-place mutation of
+        # c1/c2/c3 buffers (aliased with upper/diag/lower of the
+        # tridiagonal system). The JAX backend can't mutate -- its
+        # ``interpolate_wrap`` returns the fitted coefficients
+        # functionally instead.
+        if self.backend.name == "gbt_jax":
+            c1_flat, c2_flat, c3_flat = self.interpolate_arrays(
+                self.x_flat, self.y_flat, B_flat,
+                B_flat, B_flat, B_flat,    # the three buffer slots are unused on JAX
+                self.length, self.ninterps,
+            )
+            self.c1_flat = c1_flat
+            self.c2_flat = c2_flat
+            self.c3_flat = c3_flat
+        else:
+            self.c1_flat = upper_diag = self.xp.zeros_like(B_flat)
+            self.c2_flat = diag = self.xp.zeros_like(B_flat)
+            self.c3_flat = lower_diag = self.xp.zeros_like(B_flat)
+            self.interpolate_arrays(
+                self.x_flat,
+                self.y_flat,
+                B_flat,
+                upper_diag,
+                diag,
+                lower_diag,
+                self.length,
+                self.ninterps,
+            )
 
     @property
     def spline_type(self) -> int:
@@ -193,7 +207,12 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
     
     @classmethod
     def supported_backends(cls) -> list:
-        return ["gbt_" + _tmp for _tmp in cls.GPU_RECOMMENDED()]
+        # Append the pure-JAX backend after the GPU/CPU options so that
+        # the default "first available" pick stays GPU/CPU when both
+        # are present. Users opt into the JAX path with
+        # force_backend="jax" (or by passing in JAX arrays via
+        # downstream code that already resolved to gbt_jax).
+        return ["gbt_" + _tmp for _tmp in cls.GPU_RECOMMENDED()] + ["gbt_jax"]
 
     @property
     def interpolate_arrays(self) -> callable:

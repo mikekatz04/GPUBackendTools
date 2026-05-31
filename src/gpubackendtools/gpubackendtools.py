@@ -96,6 +96,26 @@ class Backend:
         self.xp = methods.xp
         self.features = features
 
+    def __deepcopy__(self, memo):
+        # Backends carry a module reference (``self.xp`` is the numpy /
+        # cupy module) plus C-extension function objects, both of which
+        # can't be pickled and therefore can't be deepcopied through the
+        # default __reduce__ protocol. They're also conceptually
+        # singletons: one Backend instance per (package, flavor) lives
+        # in the global BackendsManager registry and is shared across
+        # the whole process, so duplicating one would silently produce
+        # a second "view" of the same kernels with no semantic value.
+        # Return self so deepcopy of any settings tree that transitively
+        # holds a Backend (DataResidualArray.force_backend, DomainSettings
+        # .force_backend, ParallelModuleBase subclasses, ...) completes
+        # without TypeError.
+        return self
+
+    def __copy__(self):
+        # Same rationale as __deepcopy__: Backend is a process-wide
+        # singleton, never a value to clone.
+        return self
+
     @staticmethod
     def _check_module_installed(backend_name: str, module_name: str):
         """Check that the module containing the backend implementation is installed."""

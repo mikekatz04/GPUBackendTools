@@ -105,10 +105,12 @@ sdist.include = [
   #"src/gpubackendtools/cutils/CubicSpline.cu",
   "src/gpubackendtools/cutils/Interpolate.cu",
   "src/gpubackendtools/cutils/Interpolate.hh",
+  "src/gpubackendtools/cutils/InterpolateDevice.hh",
   "src/gpubackendtools/cutils/cuda_complex.hpp",
   "src/gpubackendtools/cutils/gbt_global.h",
-  "src/gpubackendtools/cutils/pybind11_cuda_array_interface.hpp", 
+  "src/gpubackendtools/cutils/pybind11_cuda_array_interface.hpp",
   "src/gpubackendtools/cutils/cmake_functions.cmake",
+  "src/gpubackendtools/cutils/GPUBackendToolsConfig.cmake",
 ]
 sdist.exclude = [
   ".devcontainer/",

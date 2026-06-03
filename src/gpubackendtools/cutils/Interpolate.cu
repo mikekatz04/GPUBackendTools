@@ -337,104 +337,11 @@ void interpolate(double *x, double *propArrays,
 }
 
 
-CUDA_DEVICE
-int CubicSpline::get_window(double x_new, int spline_index)
-{
-    int window = 0;
-    // TODO: switch statement
-    // TODO: MAKE FASTER
-    if (spline_type == CUBIC_SPLINE_LINEAR_SPACING)
-    {
-        window = int(x_new / (x0[spline_index * length + 1] - x0[spline_index * length + 0]));
-    }
-    else if (spline_type == CUBIC_SPLINE_LOG10_SPACING)
-    {
-        window = int(log10(x_new) / (log10(x0[spline_index * length + 1]) - log10(x0[spline_index * length + 0])));  // does this slow it down?
-    }
-    else if (spline_type == CUBIC_SPLINE_GENERAL_SPACING)
-    {
-        window = binary_search(&x0[spline_index * length], 0, length, x_new);
-        // printf("INSIDE: %e %e %e %d %d %d\n", x_new, x0[spline_index * length], x0[spline_index * length + length - 1], window, length, spline_index);
-        // if (x0[spline_index * length + length - 1] == 0.0)
-        // {
-        //     printf("INSIDE2: %e %e %e %d %d %d\n", x_new, x0[spline_index * length], x0[spline_index * length + length - 1], window, length, spline_index);
-        
-        //     for (int j = 0; j < ninterps; j += 1)
-        //     {
-        //       for (int i = 0; i < length; i += 100)
-        //       {
-        //         printf("WHAT?: %d (%d) %d (%d) %.12e \n", j, ninterps, i, length, x0[j * length + i]);
-        //       }
-        //     }
-        //     return -2;
-        // }
-      }
-    else
-    {
-#ifdef __CUDACC__
-        // printf("BAD cubic spline type. (%d)\n", spline_type);
-#else
-        std::string error_str = "BAD cubic spline type. (" + std::to_string(spline_type) + ")"; 
-        throw std::invalid_argument(error_str);
-#endif // __CUDACC__
-    }
-
-    if ((window < 0) || (window >= length))
-    {
-#ifdef __CUDACC__
-        // printf("Outside spline. Using edge value.");
-        if (window < 0) window = 0;
-        if (window >= length) window = length - 1;
-#else
-        std::string error_str = "Outside spline." + std::to_string(window) + " " + std::to_string(length) + " " + std::to_string(x_new) + " " + std::to_string(x0[length-1]); 
-        throw std::invalid_argument(error_str);
-#endif // __CUDACC__
-    }
-    
-    return window;
-}
-
-CUDA_DEVICE
-CubicSplineSegment CubicSpline::get_cublic_spline_segment(double x_new, int spline_index)
-{
-    int window = get_window(x_new, spline_index); 
-    if (window == -2)
-    {
-      // printf("OUTSIDE: %e %e %e %d %d %d\n", x_new, x0[spline_index * length], x0[spline_index * length + length - 1], window, length, spline_index);
-#ifdef __CUDACC__
-#else
-      throw std::invalid_argument("BAD.");
-#endif
-    }    
-    int _index = spline_index * length + window; 
-    CubicSplineSegment segment(x0[_index], y0[_index], c1[_index], c2[_index], c3[_index], spline_type);
-    return segment;
-}
-
-
-CUDA_DEVICE
-double CubicSpline::eval_single(double x_new, int spline_index)
-{
-    CubicSplineSegment segment = get_cublic_spline_segment(x_new, spline_index);
-    return segment.eval(x_new);
-}
-
-
-CUDA_DEVICE
-void CubicSpline::eval(double *y_new, double *x_new, int *spline_index, int N)
-{
-#ifdef __CUDACC__
-  int start1 = threadIdx.x + blockIdx.x * blockDim.x;
-  int diff1 = gridDim.x * blockDim.x;
-#else
-  int start1 = 0;
-  int diff1 = 1;
-#endif
-    for (int i = start1; i < N; i += diff1)
-    {
-        y_new[i] = eval_single(x_new[i], spline_index[i]);
-    }
-}
+// CubicSpline::get_window / get_cublic_spline_segment / eval_single / eval
+// were moved to InterpolateDevice.hh as inline device methods so downstream
+// `.cu` translation units can evaluate splines without linking against this
+// archive. The host-launcher path (`eval_kernel` + `eval_wrap`) below still
+// lives here.
 
 CUDA_KERNEL
 void eval_kernel(CubicSpline *spline, double *y_new, double *x_new, int *spline_index, int N)
@@ -644,47 +551,7 @@ CubicSpline fit_cubic_spline_pcr(double *x, double *y,
 
 #endif // __CUDACC__
 
-CUDA_DEVICE
-int CubicSpline::even_sampled_search(double *array, int nmin, int nmax, double x) {
-    // TODO: adjust this. At specialized gpu array searching. 
-    double dx = array[1] - array[0];
-    return (int)floor(x/dx);
-}
-
-// Recursive binary search function.
-// Return nearest smaller neighbor of x in array[nmin,nmax] is present,
-// otherwise -1
-CUDA_DEVICE
-int CubicSpline::binary_search(double *array, int nmin, int nmax, double x)
-{
-    // catch if x exactly matches array[nmin]
-    if(x==array[nmin]) return nmin;
-    
-    int next;
-    if(nmax>nmin)
-    {
-        int mid = nmin + (nmax - nmin) / 2;
-        
-        //find next unique element of array
-        next = mid;
-        while(array[mid]==array[next]) next++;
-        
-        // If the element is present at the middle
-        // itself
-        if (x > array[mid] && x < array[next])
-            return mid;
-        
-        // the element is in the lower half
-        if (array[mid] >= x)
-            return binary_search(array, nmin, mid, x);
-        
-        // the element is in upper half
-        return binary_search(array, next, nmax, x);
-    }
-    
-    // We reach here when element is not
-    // present in array
-    return -1;
-}
+// CubicSpline::even_sampled_search / binary_search moved to
+// InterpolateDevice.hh (header-only).
 
 

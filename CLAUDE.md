@@ -89,12 +89,21 @@ User-facing classes inherit from `ParallelModuleBase` (`parallelbase.py`), which
 
 ## Native Sources (`src/gpubackendtools/cutils/`)
 
-- `Interpolate.cu` / `Interpolate.hh` — cubic-spline / general interpolation kernels. The `.cu` file is **copied to `Interpolate.cxx` at build time** and compiled by the C++ compiler for the CPU backend; the same `.cu` is compiled by `nvcc` for the GPU backend (see the `add_custom_command` in `cutils/CMakeLists.txt`). **Code must be valid as both** — guard CUDA-only intrinsics with the macros in `gbt_global.h`.
+- `Interpolate.cu` / `Interpolate.hh` — heavy spline build/solve (LAPACKE tridiagonal on CPU, cuSPARSE on GPU, plus PCR launcher on GPU). The `.cu` is **copied to `Interpolate.cxx` at build time** and compiled by the C++ compiler for the CPU backend; the same `.cu` is compiled by `nvcc` for the GPU backend. **Code must be valid as both** — guard CUDA-only intrinsics with the macros in `gbt_global.h`.
+- **`InterpolateDevice.hh`** (Phase 1, 2026-06-02) — header-only `__device__` cubic-spline evaluators (`CubicSpline`, `CubicSplineSegment`, `get_window`, `binary_search`, `even_sampled_search`, `eval_single`, `eval`). Downstream `.cu` files `#include "InterpolateDevice.hh"` to evaluate splines without linking against `Interpolate.cu`. All method bodies that used to be out-of-line in `Interpolate.cu` are now inlined here.
 - `gbt_binding.cxx` / `gbt_binding.hpp` — pybind11 module exposing the C++/CUDA functions to Python (one shared binding source for both CPU and GPU builds; the produced extension is `gbt_backend_<flavor>.interp`).
 - `pybind11_cuda_array_interface.hpp` — pybind11 caster that lets functions accept CuPy arrays via `__cuda_array_interface__`.
-- `cuda_complex.hpp` — host/device-portable complex type.
+- `cuda_complex.hpp` — host/device-portable complex type. **Sprint-wide single copy**; LAT's local duplicate was deleted at Phase 2d.
+- **`GPUBackendToolsConfig.cmake`** (Phase 1) — forward-compat CMake config for downstream `find_package(GPUBackendTools CONFIG REQUIRED)` → `GPUBackendTools::headers` interface target.
 - `CubicSpline.cu`, `interp.pyx`, `interp.pxd`, `dev_ptr_issue.pyx` — legacy Cython artifacts. The active path is the pybind11 module produced from `gbt_binding.cxx`. Cython sources are excluded from wheels (`wheel.exclude` in `pyproject.toml`).
 - `cmake_functions.cmake` — `apply_cpu_backend_common_options` / `apply_gpu_backend_common_options` helpers and `get_lapacke()` LAPACKE detector.
+
+## Downstream consumption (Phase 1)
+
+Downstream packages (LAT, GBGPU, BBHx, FastEMRIWaveforms) consume GBT
+headers via two equivalent mechanisms:
+- `gpubackendtools.get_include() -> str` — absolute path to `cutils/`. Primary; used in CMake via `execute_process(COMMAND python -c "import gpubackendtools; print(gpubackendtools.get_include())" ...)`.
+- `gpubackendtools.get_cmake_module_path() -> str` — same path, packaged with `GPUBackendToolsConfig.cmake` for `find_package(GPUBackendTools CONFIG)` callers.
 
 ## Python package layout (`src/gpubackendtools/`)
 

@@ -1,15 +1,16 @@
 #include "Interpolate.hh"
 #include <string>
 #include <iostream>
-#include <pybind11/pybind11.h>
-#include <pybind11/numpy.h>
+// Phase 3M (2026-06-04): pybind11 -> nanobind migration. The bespoke
+// pybind11_cuda_array_interface.hpp caster is no longer included --
+// `nb::ndarray<T, nb::device::cuda>` understands `__cuda_array_interface__`
+// natively (and DLPack), so the hand-rolled caster is obsolete.
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/string.h>
 #include "gbt_binding.hpp"
 
-#if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
-#include "pybind11_cuda_array_interface.hpp"
-#endif
-
-namespace py = pybind11;
+namespace nb = nanobind;
 
 
 void CubicSplineWrap::eval_wrap_func(array_type<double>y_new, array_type<double>x_new, array_type<int>spline_index, int N)
@@ -86,66 +87,68 @@ void fit_cubic_spline_pcr_wrap(array_type<double> x, array_type<double> y,
 
 std::string get_module_path_gbt() {
     // Acquire the GIL if it's not already held (safe to call multiple times)
-    py::gil_scoped_acquire acquire;
+    nb::gil_scoped_acquire acquire;
 
     // Import the module by its name
-    // Note: The module name here ("interp") must match the name used in PYBIND11_MODULE
-    py::object module = py::module::import("interp");
+    // Note: The module name here ("interp") must match the name used in NB_MODULE
+    nb::object module = nb::module_::import_("interp");
 
     // Access the __file__ attribute and cast it to a C++ string
     try {
-        std::string path = module.attr("__file__").cast<std::string>();
+        std::string path = nb::cast<std::string>(module.attr("__file__"));
         return path;
-    } catch (const py::error_already_set& e) {
+    } catch (const nb::python_error& e) {
         // Handle the error if __file__ attribute is missing (e.g., if module is a namespace package)
         std::cerr << "Error getting __file__ attribute: " << e.what() << std::endl;
         return "";
     }
 }
 
-// PYBIND11_MODULE creates the entry point for the Python module
+// NB_MODULE creates the entry point for the Python module
 // The module name here must match the one used in CMakeLists.txt
-void spline_part(py::module &m) {
+void spline_part(nb::module_ &m) {
 
 #if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
-    py::class_<CubicSplineWrap>(m, "CubicSplineWrapGPU")
+    nb::class_<CubicSplineWrap>(m, "CubicSplineWrapGPU")
 #else
-    py::class_<CubicSplineWrap>(m, "CubicSplineWrapCPU")
-#endif 
+    nb::class_<CubicSplineWrap>(m, "CubicSplineWrapCPU")
+#endif
 
     // Bind the constructor
-    .def(py::init<array_type<double>, array_type<double>, array_type<double>, array_type<double>, array_type<double>, int, int, int>(), 
-         py::arg("x0"), py::arg("y0"), py::arg("c1"), py::arg("c2"), py::arg("c3"), py::arg("ninterps"), py::arg("length"), py::arg("spline_type"))
+    .def(nb::init<array_type<double>, array_type<double>, array_type<double>, array_type<double>, array_type<double>, int, int, int>(),
+         nb::arg("x0"), nb::arg("y0"), nb::arg("c1"), nb::arg("c2"), nb::arg("c3"), nb::arg("ninterps"), nb::arg("length"), nb::arg("spline_type"))
     // Bind member functions
     .def("eval_wrap", &CubicSplineWrap::eval_wrap_func, "Evaluate splines.")
-    // You can also expose public data members directly using def_readwrite
-    .def_readwrite("spline", &CubicSplineWrap::spline)
+    // You can also expose public data members directly using def_rw
+    .def_rw("spline", &CubicSplineWrap::spline)
     // .def("get_link_ind", &CubicSplineWrap::get_link_ind, "Get link index.")
     ;
 
 
+// Phase 3M (2026-06-04): the raw-pointer init that pybind11 silently
+// accepted -- `.def(nb::init<double *, double *, double *, double *,
+// double *, int, int, int>(), ...)` -- is rejected by nanobind because
+// `int -> double *` is a narrowing conversion. It was never usable from
+// Python anyway (you can't pass raw `double *` from Python). The class
+// is still registered so existing isinstance / cross-module casts on
+// `CubicSpline{CPU,GPU}` keep working; Python code that needs to
+// construct one goes through `CubicSplineWrap{CPU,GPU}`.
 #if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
-    py::class_<CubicSpline>(m, "CubicSplineGPU")
+    nb::class_<CubicSpline>(m, "CubicSplineGPU");
 #else
-    py::class_<CubicSpline>(m, "CubicSplineCPU")
+    nb::class_<CubicSpline>(m, "CubicSplineCPU");
 #endif
-
-    // Bind the constructor
-    .def(py::init<double *, double *, double *, double *, double *, int, int, int>(),
-         py::arg("x0"), py::arg("y0"), py::arg("c1"), py::arg("c2"), py::arg("c3"), py::arg("ninterps"), py::arg("length"), py::arg("spline_type"))
-
-    ;
 }
 
 
 
-PYBIND11_MODULE(interp, m) {
+NB_MODULE(interp, m) {
     m.doc() = "Cubic Spline C++ plug-in"; // Optional module docstring
 
     m.attr("CUBIC_SPLINE_LINEAR_SPACING") = CUBIC_SPLINE_LINEAR_SPACING;
     m.attr("CUBIC_SPLINE_LOG10_SPACING") = CUBIC_SPLINE_LOG10_SPACING;
     m.attr("CUBIC_SPLINE_GENERAL_SPACING") = CUBIC_SPLINE_GENERAL_SPACING;
-    
+
     // Call initialization functions from other files
     spline_part(m);
     m.def("check_spline", &check_spline, "Make sure that we can insert spline properly.");
@@ -164,14 +167,13 @@ PYBIND11_MODULE(interp, m) {
     // might not be fully set during the initial call if the module is loaded in
     // a specific way (e.g., via pythonw or as a namespace package).
     try {
-        std::string path_at_init = m.attr("__file__").cast<std::string>();
+        std::string path_at_init = nb::cast<std::string>(m.attr("__file__"));
         // std::cout << "Module loaded from: " << path_at_init << std::endl;
-        m.attr("module_dir") = py::cast(path_at_init.substr(0, path_at_init.find_last_of("/\\")));
-    } catch (py::error_already_set &e) {
+        m.attr("module_dir") = nb::cast(path_at_init.substr(0, path_at_init.find_last_of("/\\")));
+    } catch (nb::python_error &e) {
          // Handle potential error here, e.g., by logging or setting a default value
         std::cerr << "Could not capture __file__ at init time." << std::endl;
         e.restore(); // Restore exception state for proper Python handling
         PyErr_Clear();
     }
 }
-

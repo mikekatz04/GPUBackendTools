@@ -4,18 +4,36 @@
 #include "Interpolate.hh"
 #include <string>
 #include <iostream>
-#include <pybind11/pybind11.h>
-#include <pybind11/numpy.h>
+// Phase 3M (2026-06-04): sprint-wide pybind11 -> nanobind migration.
+// The CUDA-array story is dramatically simpler now -- nanobind ships
+// `nb::ndarray<T, nb::device::cuda>` with first-class
+// `__cuda_array_interface__` + DLPack support, so the bespoke
+// pybind11_cuda_array_interface.hpp caster has been retired from the
+// active include chain (the file is kept on disk during the
+// transition so any straggling downstream still on pybind11 can build,
+// but no sprint binding source includes it after Phase 3M).
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+// `nb::class_<T>::def_*` need these specializations available.
+#include <nanobind/stl/string.h>
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
+// `array_type<T>` is the sprint-wide numpy/CuPy-array typedef every
+// binding TU consumes (LAT, GBGPU, BBHx, lisa-on-gpu, and GBT itself).
+// Mirrors the pre-Phase-3M pybind11 version: CPU builds bind against
+// host numpy arrays, GPU builds bind against device CuPy arrays.
+//
+// Notes for migrating users:
+// - Use `arr.data()` (typed T*) instead of `(T*)arr.request().ptr`.
+// - Use `arr.size()` instead of `arr.request().size`.
+// - Use `arr.shape(i)` (size_t) instead of `arr.request().shape[i]`.
 #if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
-#include "pybind11_cuda_array_interface.hpp"
 template<typename T>
-using array_type = cai::cuda_array_t<T>;
+using array_type = nb::ndarray<T, nb::device::cuda>;
 #else
 template<typename T>
-using array_type = py::array_t<T>;
+using array_type = nb::ndarray<T, nb::device::cpu>;
 #endif
 
 #if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
@@ -46,23 +64,17 @@ class CubicSplineWrap {
     template<typename T>
     static T* return_pointer_and_check_length(array_type<T> input1, std::string name, int N, int multiplier)
     {
-#if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
-        T *ptr1 = static_cast<T *>(input1.get_compatible_typed_pointer());
-        
-#else
-        py::buffer_info buf1 = input1.request();
-
-        if (buf1.size != N * multiplier)
+        // nanobind's `nb::ndarray<T, ...>` exposes `.size()` (total elements)
+        // and `.data()` (typed T* into the underlying numpy/CuPy buffer)
+        // uniformly across CPU/GPU device tags. No buffer_info dance.
+        if (input1.size() != static_cast<size_t>(N) * static_cast<size_t>(multiplier))
         {
-            std::string err_out = name + ": input arrays have the incorrect length. Should be " + std::to_string(N * multiplier) + ". It's length is " + std::to_string(buf1.size) + ".";
+            std::string err_out = name + ": input arrays have the incorrect length. Should be " + std::to_string(static_cast<size_t>(N) * static_cast<size_t>(multiplier)) + ". It's length is " + std::to_string(input1.size()) + ".";
             throw std::invalid_argument(err_out);
         }
-        T* ptr1 = static_cast<T *>(buf1.ptr);
-#endif
-        return ptr1;
+        return input1.data();
     };
 
 };
 
 #endif // __BINDING_HPP__
-

@@ -58,7 +58,7 @@ if(GBT_WITH_CPU)
   target_link_libraries(gpubackendtools_cpu_interp_static LINK_PUBLIC ${GBT_LAPACKE_LIBS}
                         ${GBT_LAPACKE_EXTRA_LIBS})
 
-  pybind11_add_module(gpubackendtools_cpu_interp gbt_binding.cxx)
+  nanobind_add_module(gpubackendtools_cpu_interp gbt_binding.cxx)
   apply_cpu_backend_common_options(interp gbt gpubackendtools false)
   target_link_libraries(gpubackendtools_cpu_interp PRIVATE gpubackendtools_cpu_interp_static)
   # target_include_directories(gpubackendtools_cpu_interp PUBLIC ${GBT_CUTILS})
@@ -77,7 +77,7 @@ if(GBT_WITH_GPU)
   target_sources(gpubackendtools_gpu_interp_gpu_static PUBLIC FILE_SET HEADERS FILES
                                         Interpolate.hh)
   
-  pybind11_add_module(gpubackendtools_gpu_interp gbt_binding.cxx)
+  nanobind_add_module(gpubackendtools_gpu_interp gbt_binding.cxx)
   apply_gpu_backend_common_options(interp gbt gpubackendtools false)
   target_link_libraries(gpubackendtools_gpu_interp PRIVATE gpubackendtools_gpu_interp_gpu_static)
   # target_include_directories(gpubackendtools_gpu_interp PUBLIC ${GBT_CUTILS})

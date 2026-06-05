@@ -1,7 +1,7 @@
 [build-system]
 build-backend = "scikit_build_core.build"
 
-requires = ["pybind11", "cython", "numpy", "scikit-build-core"]
+requires = ["nanobind>=2.4.0,<3", "cython", "numpy", "scikit-build-core"]
 
 
 [project]
@@ -108,7 +108,8 @@ sdist.include = [
   "src/gpubackendtools/cutils/InterpolateDevice.hh",
   "src/gpubackendtools/cutils/cuda_complex.hpp",
   "src/gpubackendtools/cutils/gbt_global.h",
-  "src/gpubackendtools/cutils/pybind11_cuda_array_interface.hpp",
+  # pybind11_cuda_array_interface.hpp deleted at Phase 3M (2026-06-04):
+  # nanobind's `nb::ndarray<T, nb::device::cuda>` makes the bespoke caster obsolete.
   "src/gpubackendtools/cutils/cmake_functions.cmake",
   "src/gpubackendtools/cutils/GPUBackendToolsConfig.cmake",
 ]

@@ -138,6 +138,39 @@ class GBTCuda12xBackend(Cuda12xBackend, GBTBackend):
             CubicSpline=gbt_backend_cuda12x.interp.CubicSplineGPU,
             xp=cupy,
         )
+    
+class GBTCuda13xBackend(Cuda13xBackend, GBTBackend):
+    """Implementation of CUDA 13.x backend"""
+    _backend_name : str = "gbt_backend_cuda13x"
+    _name = "gbt_cuda13x"
+    
+    def __init__(self, *args, **kwargs):
+        Cuda13xBackend.__init__(self, *args, **kwargs)
+        GBTBackend.__init__(self, self.cuda13x_module_loader())
+        
+    @staticmethod
+    def cuda13x_module_loader():
+        try:
+            import gbt_backend_cuda13x.interp
+
+        except (ModuleNotFoundError, ImportError) as e:
+            raise BackendUnavailableException(
+                "'cuda13x' backend could not be imported."
+            ) from e
+
+        try:
+            import cupy
+        except (ModuleNotFoundError, ImportError) as e:
+            raise MissingDependencies(
+                "'cuda13x' backend requires cupy", pip_deps=["cupy-cuda13x"]
+            ) from e
+
+        return GBTBackendMethods(
+            interpolate_wrap=gbt_backend_cuda13x.interp.interpolate_wrap,
+            CubicSplineWrap=gbt_backend_cuda13x.interp.CubicSplineWrapGPU,
+            CubicSpline=gbt_backend_cuda13x.interp.CubicSplineGPU,
+            xp=cupy,
+        )
 
 
 class GBTCuda13xBackend(Cuda13xBackend, GBTBackend):

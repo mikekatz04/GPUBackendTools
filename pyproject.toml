@@ -109,6 +109,7 @@ sdist.include = [
   "src/gpubackendtools/cutils/gbt_global.h",
   "src/gpubackendtools/cutils/pybind11_cuda_array_interface.hpp", 
   "src/gpubackendtools/cutils/cmake_functions.cmake",
+  "src/gpubackendtools/cutils/gbt_binding.hpp"
 ]
 sdist.exclude = [
   ".devcontainer/",

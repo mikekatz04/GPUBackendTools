@@ -24,15 +24,16 @@ author = "Michael L. Katz, Maxime Pigou, Mathieu Dubois"
 
 import sys
 import os
+import shutil
 
 sys.path.insert(0, os.path.abspath("../../"))
 
+dir_path = os.path.dirname(os.path.realpath(__file__)) + "/../../"
 
-# TODO: do we need a tutorial
-# shutil.copy(
-#     "../../examples/Backend.ipynb",
-#     "GPUBackendTools_tutorial.ipynb",
-# )
+shutil.copy(
+    dir_path + "examples/GPUBackendTools_tutorial.ipynb",
+    dir_path + "docs/source/GPUBackendTools_tutorial.ipynb",
+)
 
 
 # -- General configuration ---------------------------------------------------

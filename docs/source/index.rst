@@ -6,10 +6,10 @@
    :caption: Documentation:
 
    user/gpubackendtools
-   user/parallelmodulebase
+   user/parallelbase
 
 .. toctree::
    :maxdepth: 4
    :caption: Tutorial:
 
-   lisatools_tutorial
+   GPUBackendTools_tutorial

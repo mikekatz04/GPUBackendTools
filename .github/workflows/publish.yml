@@ -30,7 +30,7 @@ jobs:
           echo "GBTWHL_BUILD=true" >> "$GITHUB_ENV"
           echo "GBTWHL_PUBLISH=true" >> "$GITHUB_ENV"
       - name: add core-suffix on non-official repo
-        if: github.event.repository.full_name != 'mikekatz04/LISAanalysistools'
+        if: github.event.repository.full_name != 'lisa-analysis-tools/GPUBackendTools'
         run: |
           echo "GBTWHL_CORE_SUFFIX=true" >> "$GITHUB_ENV"
       - name: output results

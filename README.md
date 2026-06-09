@@ -15,7 +15,7 @@
 
 ## Versioning
 
-We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/mikekatz04/GPUBackendTools/tags).
+We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/lisa-analysis-tools/GPUBackendTools/tags).
 
 ## Authors
 
@@ -28,4 +28,4 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 
 ## License
 
-This project is licensed under the Apache License - see the [LICENSE](https://github.com/mikekatz04/GPUBackendTools/blob/master/LICENSE) file for details.
+This project is licensed under the Apache License - see the [LICENSE](https://github.com/lisa-analysis-tools/GPUBackendTools/blob/master/LICENSE) file for details.

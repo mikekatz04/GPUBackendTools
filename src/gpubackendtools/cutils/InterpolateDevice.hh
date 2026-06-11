@@ -162,8 +162,9 @@ public:
     CUDA_DEVICE
     int even_sampled_search(double *array, int nmin, int nmax, double x)
     {
-        double dx = array[1] - array[0];
-        return (int)floor(x / dx);
+        // Index relative to the grid origin: grids need not start at 0.
+        double dx = array[nmin + 1] - array[nmin];
+        return (int)floor((x - array[nmin]) / dx);
     }
 
     // Recursive binary search. Returns the nearest smaller neighbour of x in
@@ -200,11 +201,13 @@ public:
         int window = 0;
         if (spline_type == CUBIC_SPLINE_LINEAR_SPACING)
         {
-            window = int(x_new / (x0[spline_index * length + 1] - x0[spline_index * length + 0]));
+            // Subtract the grid origin: uniform grids need not start at 0.
+            window = int((x_new - x0[spline_index * length + 0]) / (x0[spline_index * length + 1] - x0[spline_index * length + 0]));
         }
         else if (spline_type == CUBIC_SPLINE_LOG10_SPACING)
         {
-            window = int(log10(x_new) / (log10(x0[spline_index * length + 1]) - log10(x0[spline_index * length + 0])));
+            // Same origin correction in log10 space (origin need not be 1).
+            window = int((log10(x_new) - log10(x0[spline_index * length + 0])) / (log10(x0[spline_index * length + 1]) - log10(x0[spline_index * length + 0])));
         }
         else if (spline_type == CUBIC_SPLINE_GENERAL_SPACING)
         {
@@ -226,7 +229,7 @@ public:
             if (window < 0) window = 0;
             if (window >= length) window = length - 1;
 #else
-            std::string error_str = "Outside spline." + std::to_string(window) + " " + std::to_string(length) + " " + std::to_string(x_new) + " " + std::to_string(x0[length - 1]);
+            std::string error_str = "Outside spline." + std::to_string(window) + " " + std::to_string(length) + " " + std::to_string(x_new) + " [" + std::to_string(x0[spline_index * length + 0]) + ", " + std::to_string(x0[spline_index * length + length - 1]) + "]";
             throw std::invalid_argument(error_str);
 #endif
         }

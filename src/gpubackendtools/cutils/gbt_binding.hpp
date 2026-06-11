@@ -1,5 +1,5 @@
-#ifndef __BINDING_HPP__
-#define __BINDING_HPP__
+#ifndef __GBT_BINDING_HPP__
+#define __GBT_BINDING_HPP__
 
 #include "Interpolate.hh"
 #include <string>
@@ -77,4 +77,4 @@ class CubicSplineWrap {
 
 };
 
-#endif // __BINDING_HPP__
+#endif // __GBT_BINDING_HPP__

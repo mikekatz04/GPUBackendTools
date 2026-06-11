@@ -1,7 +1,11 @@
 [build-system]
 build-backend = "scikit_build_core.build"
 
-requires = ["nanobind>=2.4.0,<3", "cython", "numpy", "scikit-build-core"]
+# nanobind is pinned EXACTLY (sprint-wide invariant, see LAT
+# constraints/sprint.txt): cross-wheel nanobind type sharing (OrbitsWrap,
+# CubicSplineWrap, ...) requires every separately-built wheel to embed the
+# same nanobind internals ABI. Bump in ONE sprint-wide PR only.
+requires = ["nanobind==2.12.0", "cython", "numpy", "scikit-build-core"]
 
 
 [project]

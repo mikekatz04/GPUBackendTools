@@ -417,3 +417,305 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         if hasattr(self.xp, "cuda"):
             self.xp.get_default_memory_pool().free_all_block()
         return y_new
+
+
+class QuinticSplineInterpolant(GBTParallelModuleBase):
+    """GPU-accelerated Multiple Quintic (degree-5) Splines.
+
+    Drop-in replacement for :class:`CubicSplineInterpolant` with identical
+    constructor and ``__call__`` signatures. Produces multiple degree-5 splines
+    with "not-a-knot" boundary conditions, reproducing
+    ``scipy.interpolate.make_interp_spline(x, y, k=5)`` (``bc_type=None``) at the
+    result level (~machine precision). Each spline requires ``length >= 6`` and a
+    strictly increasing ``x`` grid.
+
+    This class has GPU capability (native CPU / CUDA backends).
+
+    Args:
+        x (xp.ndarray): x values, 1D flattened ``(ninterps * length)`` or shaped
+            ``(..., length)``.
+        y_all (xp.ndarray): y values, same shape as ``x``.
+        ninterps (int, optional): required if inputs are flattened.
+        length (int, optional): required if inputs are flattened.
+        spline_type (int, optional): spacing hint; auto-detected if ``None``.
+        force_backend (str, optional): ``"cpu"``, ``"gpu"``, ``"cuda"``, ...
+
+    Raises:
+        ValueError: If input arguments are not correct.
+    """
+
+    # Bound the internally-allocated banded scratch (9*length doubles per spline)
+    # by processing the batch in tiles of at most this many bytes on the GPU.
+    _BAND_SCRATCH_BUDGET_BYTES = 512 * 1024 * 1024
+
+    def __init__(
+        self,
+        x,
+        y_all,
+        ninterps=None,
+        length=None,
+        spline_type=None,
+        force_backend=None,
+    ):
+
+        super().__init__(force_backend=force_backend)
+
+        # first check is for flattened arrays
+        if x.ndim == 1 or y_all.ndim == 1:
+            if x.ndim != 1 or y_all.ndim != 1:
+                raise ValueError(
+                    "If providing flattened x and y_all, need to both be flattened."
+                )
+            if len(x) != len(y_all):
+                raise ValueError("x and y must have same length.")
+
+            if length is None or ninterps is None:
+                raise ValueError(
+                    "If providing flattened arrays, need to provide dimensional information: length, ninterps."
+                )
+
+            if len(x) != length * ninterps:
+                raise ValueError(
+                    f"Length of the x array is not correct. It is supposed to be {length * ninterps}. It is currently {len(x)}."
+                )
+            if len(y_all) != length * ninterps:
+                raise ValueError(
+                    f"Length of the y_all array is not correct. It is supposed to be {length * ninterps}. It is currently {len(y_all)}."
+                )
+            self.length = length
+            self.ninterps = ninterps
+            self.reshape_shape = (self.ninterps, self.length)
+
+        else:
+            # assumes last dimension is length
+            if x.shape != y_all.shape:
+                raise ValueError("x and y must have the same shape with the final dimension being the length of the spline.")
+
+            self.reshape_shape = x.shape
+            self.length = x.shape[-1]
+            self.ninterps = int(np.prod(x.shape[:-1]))
+            x = x.flatten()
+            y_all = y_all.flatten()
+
+        # quintic (k=5) not-a-knot requires at least k+1 = 6 points per spline
+        if self.length < 6:
+            raise ValueError(
+                f"Quintic spline requires length >= 6; got length={self.length}."
+            )
+
+        self.degree = 5
+
+        # setup all arrays for interpolation
+        self.y_flat = self.xp.asarray(y_all)
+        self.x_flat = self.xp.asarray(x)
+
+        if self.xp.allclose((_diff := self.xp.diff(self.x, axis=-1)), _diff[..., 0][..., None]):
+            spline_type = CUBIC_SPLINE_LINEAR_SPACING
+        elif self.xp.allclose((_diff := self.xp.diff(self.xp.log10(self.x), axis=-1)), _diff[..., 0][..., None]):
+            spline_type = CUBIC_SPLINE_LOG10_SPACING
+        else:
+            spline_type = CUBIC_SPLINE_GENERAL_SPACING
+
+        self.spline_type = spline_type
+
+        # allocate the five power-basis coefficient buffers (filled in place by
+        # the native quintic fit; the banded scratch is allocated inside C++).
+        self.c1_flat = self.xp.zeros_like(self.x_flat)
+        self.c2_flat = self.xp.zeros_like(self.x_flat)
+        self.c3_flat = self.xp.zeros_like(self.x_flat)
+        self.c4_flat = self.xp.zeros_like(self.x_flat)
+        self.c5_flat = self.xp.zeros_like(self.x_flat)
+
+        # Fit in tiles over ninterps to bound the internal banded scratch. The
+        # flat layout is interp-major (interp_i*length + i), so a contiguous
+        # slice of `tile` splines is `[s0*length : s1*length]`.
+        per_spline = 9 * self.length * 8
+        tile = max(1, min(self.ninterps, self._BAND_SCRATCH_BUDGET_BYTES // per_spline))
+        for s0 in range(0, self.ninterps, tile):
+            s1 = min(s0 + tile, self.ninterps)
+            sl = slice(s0 * self.length, s1 * self.length)
+            self.interpolate_arrays(
+                self.x_flat[sl],
+                self.y_flat[sl],
+                self.c1_flat[sl],
+                self.c2_flat[sl],
+                self.c3_flat[sl],
+                self.c4_flat[sl],
+                self.c5_flat[sl],
+                self.length,
+                s1 - s0,
+            )
+
+    @property
+    def spline_type(self) -> int:
+        return self._spline_type
+
+    @spline_type.setter
+    def spline_type(self, spline_type: int):
+        if spline_type not in [CUBIC_SPLINE_LINEAR_SPACING, CUBIC_SPLINE_LOG10_SPACING, CUBIC_SPLINE_GENERAL_SPACING]:
+            raise ValueError("spline_type must be one of CUBIC_SPLINE_LINEAR_SPACING, CUBIC_SPLINE_LOG10_SPACING, CUBIC_SPLINE_GENERAL_SPACING.")
+        self._spline_type = spline_type
+
+    @property
+    def xp(self) -> object:
+        """Numpy or Cupy"""
+        return self.backend.xp
+
+    @classmethod
+    def supported_backends(cls) -> list:
+        # Native C++/CUDA backends only (no pure-JAX quintic path yet).
+        return ["gbt_" + _tmp for _tmp in cls.GPU_RECOMMENDED()]
+
+    @property
+    def interpolate_arrays(self) -> callable:
+        """C/CUDA wrapped function for computing quintic interpolation."""
+        return self.backend.interpolate_quintic_wrap
+
+    @property
+    def x(self):
+        """Get shaped x array."""
+        return self.x_flat.reshape(self.reshape_shape)
+
+    @property
+    def x_interp_shape(self):
+        return self.x_flat.reshape(self.ninterps, self.length)
+
+    @property
+    def y(self):
+        """Get shaped y array."""
+        return self.y_flat.reshape(self.reshape_shape)
+
+    @property
+    def y_interp_shape(self):
+        return self.y_flat.reshape(self.ninterps, self.length)
+
+    @property
+    def c1(self):
+        return self.c1_flat.reshape(self.reshape_shape)
+
+    @property
+    def c2(self):
+        return self.c2_flat.reshape(self.reshape_shape)
+
+    @property
+    def c3(self):
+        return self.c3_flat.reshape(self.reshape_shape)
+
+    @property
+    def c4(self):
+        return self.c4_flat.reshape(self.reshape_shape)
+
+    @property
+    def c5(self):
+        return self.c5_flat.reshape(self.reshape_shape)
+
+    @property
+    def container(self):
+        """Container for easy transit of interpolation information."""
+        return [self.x_flat, self.y_flat, self.c1_flat, self.c2_flat, self.c3_flat, self.c4_flat, self.c5_flat]
+
+    @property
+    def cpp_class_args(self) -> tuple:
+        """Argument tuple for the native QuinticSplineWrap class."""
+        return (
+            self.x_flat,
+            self.y_flat,
+            self.c1_flat,
+            self.c2_flat,
+            self.c3_flat,
+            self.c4_flat,
+            self.c5_flat,
+            self.ninterps,
+            self.length,
+            self.spline_type,
+        )
+
+    @property
+    def cpp_class(self):
+        # must store it or will lose access to attributes
+        self._cpp_class = self.backend.QuinticSplineWrap(*self.cpp_class_args)
+        return self._cpp_class
+
+    def __call__(self, x_new, ind_interps=None, use_c_backend=False, error_out_of_bounds=True, derivative=0):
+
+        if use_c_backend:
+            raise NotImplementedError
+
+        input_shape = x_new.shape
+        if ind_interps is None:
+            if not x_new.shape[:-1] == self.reshape_shape[:-1]:
+                raise ValueError("Must add ind_interps if x_new is not same shape (except for the last axis) as the input x array.")
+
+            ind_interps = self.xp.arange(self.ninterps)
+
+        else:
+            assert ind_interps.max().item() < self.ninterps
+            assert ind_interps.min().item() >= 0
+            if ind_interps.shape != x_new.shape[:-1]:
+                raise ValueError("When inputing ind_interps, the shape needs to match x_new.shape[:-1].")
+            ind_interps = ind_interps.flatten()
+
+        assert len(ind_interps) == len(self.xp.unique(ind_interps))
+
+        num_interps_here = len(ind_interps)
+
+        ind_interps_all = self.xp.repeat(ind_interps[:, None], x_new.shape[-1], axis=-1).reshape(num_interps_here, x_new.shape[-1])
+
+        x_new = x_new.reshape(num_interps_here, x_new.shape[-1])
+
+        assert x_new.shape == ind_interps_all.shape
+        bool1 = x_new <= self.x_interp_shape[ind_interps].max(axis=-1)[:, None]
+        bool2 = x_new >= self.x_interp_shape[ind_interps].min(axis=-1)[:, None]
+        fix = False
+        if not (self.xp.all(bool1) and self.xp.all(bool2)):
+            if error_out_of_bounds:
+                raise ValueError("New x array values are not within the bounds of the input x array for the spline. Either change the new xarray or run with error_out_of_bounds = False.")
+            else:
+                fix = True
+
+        segment_inds = (
+            searchsorted2d_vec(
+                self.x_interp_shape[ind_interps],
+                x_new.reshape(num_interps_here, x_new.shape[-1]),
+                xp=self.xp,
+                side="right",
+            )
+            - 1
+        ).reshape(x_new.shape)
+
+        if self.xp.any(segment_inds == self.length - 1):
+            segment_inds[segment_inds == self.length - 1] = self.length - 2
+
+        x0 = self.x.reshape(self.ninterps, self.length)[ind_interps_all, segment_inds]
+        y0 = self.y.reshape(self.ninterps, self.length)[ind_interps_all, segment_inds]
+
+        c1 = self.c1.reshape(self.ninterps, self.length)[ind_interps_all, segment_inds]
+        c2 = self.c2.reshape(self.ninterps, self.length)[ind_interps_all, segment_inds]
+        c3 = self.c3.reshape(self.ninterps, self.length)[ind_interps_all, segment_inds]
+        c4 = self.c4.reshape(self.ninterps, self.length)[ind_interps_all, segment_inds]
+        c5 = self.c5.reshape(self.ninterps, self.length)[ind_interps_all, segment_inds]
+
+        dx = x_new - x0
+
+        if derivative == 0:
+            y_new = y0 + dx * (c1 + dx * (c2 + dx * (c3 + dx * (c4 + dx * c5))))
+        elif derivative == 1:
+            y_new = c1 + dx * (2 * c2 + dx * (3 * c3 + dx * (4 * c4 + dx * 5 * c5)))
+        elif derivative == 2:
+            y_new = 2 * c2 + dx * (6 * c3 + dx * (12 * c4 + dx * 20 * c5))
+        elif derivative == 3:
+            y_new = 6 * c3 + dx * (24 * c4 + dx * 60 * c5)
+        elif derivative == 4:
+            y_new = 24 * c4 + dx * 120 * c5
+        elif derivative == 5:
+            y_new = 120 * c5
+        else:
+            raise ValueError("Invalid derivative order.")
+
+        if fix:
+            warnings.warn("New x array contains values outside domain of spline. Putting zeros outside domain.")
+            y_new[~(bool1 & bool2)] = 0.0
+
+        if hasattr(self.xp, "cuda"):
+            self.xp.get_default_memory_pool().free_all_blocks()
+        return y_new.reshape(input_shape)

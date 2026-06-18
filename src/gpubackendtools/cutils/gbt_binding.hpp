@@ -77,4 +77,34 @@ class CubicSplineWrap {
 
 };
 
+
+#if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
+#define QuinticSplineWrap QuinticSplineWrapGPU
+#else
+#define QuinticSplineWrap QuinticSplineWrapCPU
+#endif
+
+// Python-facing wrapper around a quintic spline (5 power-basis coefficient
+// arrays). Mirrors CubicSplineWrap; reuses its pointer/length checker.
+class QuinticSplineWrap {
+  public:
+    QuinticSpline *spline;
+    QuinticSplineWrap(array_type<double> x0_, array_type<double> y0_, array_type<double> c1_, array_type<double> c2_, array_type<double> c3_, array_type<double> c4_, array_type<double> c5_, int ninterps_, int length_, int spline_type_)
+    {
+        double *_x0 = CubicSplineWrap::return_pointer_and_check_length(x0_, "x0", length_, ninterps_);
+        double *_y0 = CubicSplineWrap::return_pointer_and_check_length(y0_, "y0", length_, ninterps_);
+        double *_c1 = CubicSplineWrap::return_pointer_and_check_length(c1_, "c1", length_, ninterps_);
+        double *_c2 = CubicSplineWrap::return_pointer_and_check_length(c2_, "c2", length_, ninterps_);
+        double *_c3 = CubicSplineWrap::return_pointer_and_check_length(c3_, "c3", length_, ninterps_);
+        double *_c4 = CubicSplineWrap::return_pointer_and_check_length(c4_, "c4", length_, ninterps_);
+        double *_c5 = CubicSplineWrap::return_pointer_and_check_length(c5_, "c5", length_, ninterps_);
+
+        spline = new QuinticSpline(_x0, _y0, _c1, _c2, _c3, _c4, _c5, ninterps_, length_, spline_type_);
+    };
+    ~QuinticSplineWrap(){
+        delete spline;
+    };
+    void eval_wrap_func(array_type<double>y_new, array_type<double>x_new, array_type<int>spline_index, int N);
+};
+
 #endif // __GBT_BINDING_HPP__

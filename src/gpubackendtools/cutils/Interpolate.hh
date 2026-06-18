@@ -16,6 +16,19 @@ void interpolate(double* x, double* propArrays,
 
 void eval_wrap(CubicSpline *spline, double *y_new, double *x_new, int *spline_index, int N);
 
+// ---- Quintic (degree-5, not-a-knot) spline: batched build/solve ----
+// Reproduces scipy.interpolate.make_interp_spline(x, y, k=5) (bc_type=None) at
+// the result level (~machine precision). Fills the five power-basis coefficient
+// arrays c1..c5 (each of size ninterps*length, flattened interp_i*length + i)
+// in place from (x, y, also ninterps*length flattened). Each spline must have
+// length >= 6 and a strictly increasing x grid. The banded-collocation scratch
+// is allocated internally (see Interpolate.cu); callers provide only c1..c5.
+void interpolate_quintic(double* x, double* y,
+                         double* c1, double* c2, double* c3, double* c4, double* c5,
+                         int length, int ninterps);
+
+void eval_quintic_wrap(QuinticSpline *spline, double *y_new, double *x_new, int *spline_index, int N);
+
 #if !defined(__CUDA_COMPILATION__) && !defined(__CUDACC__)
 // (CPU-only) Fit cubic-spline coefficients (c1, c2, c3) for ONE spline of
 // length `length` from (x, y) data using the Thomas algorithm to solve the

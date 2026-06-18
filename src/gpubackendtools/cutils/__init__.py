@@ -16,6 +16,11 @@ class GBTBackendMethods(BackendMethods):
     fit_cubic_spline_pcr: typing.Optional[typing.Callable[(...), None]]
     CubicSplineWrap: object
     CubicSpline: object
+    # Quintic (k=5) spline methods. Optional/default-None so backends that do
+    # not provide them (e.g. the pure-JAX backend) need not set them.
+    interpolate_quintic_wrap: typing.Optional[typing.Callable[(...), None]] = None
+    QuinticSplineWrap: typing.Optional[object] = None
+    QuinticSpline: typing.Optional[object] = None
 
 class GBTBackend:
     interpolate_wrap: typing.Callable[(...), None]
@@ -23,6 +28,9 @@ class GBTBackend:
     fit_cubic_spline_pcr: typing.Optional[typing.Callable[(...), None]]
     CubicSplineWrap: object
     CubicSpline: object
+    interpolate_quintic_wrap: typing.Optional[typing.Callable[(...), None]]
+    QuinticSplineWrap: typing.Optional[object]
+    QuinticSpline: typing.Optional[object]
 
     def __init__(self, gbt_backend_methods):
 
@@ -35,6 +43,9 @@ class GBTBackend:
         self.fit_cubic_spline_pcr = gbt_backend_methods.fit_cubic_spline_pcr
         self.CubicSplineWrap = gbt_backend_methods.CubicSplineWrap
         self.CubicSpline = gbt_backend_methods.CubicSpline
+        self.interpolate_quintic_wrap = gbt_backend_methods.interpolate_quintic_wrap
+        self.QuinticSplineWrap = gbt_backend_methods.QuinticSplineWrap
+        self.QuinticSpline = gbt_backend_methods.QuinticSpline
 
 
 class GBTCpuBackend(CpuBackend, GBTBackend):
@@ -64,6 +75,9 @@ class GBTCpuBackend(CpuBackend, GBTBackend):
             fit_cubic_spline_pcr=None,
             CubicSplineWrap=gbt_backend_cpu.interp.CubicSplineWrapCPU,
             CubicSpline=gbt_backend_cpu.interp.CubicSplineCPU,
+            interpolate_quintic_wrap=gbt_backend_cpu.interp.interpolate_quintic_wrap,
+            QuinticSplineWrap=gbt_backend_cpu.interp.QuinticSplineWrapCPU,
+            QuinticSpline=gbt_backend_cpu.interp.QuinticSplineCPU,
             xp=numpy,
         )
 
@@ -101,6 +115,9 @@ class GBTCuda11xBackend(Cuda11xBackend, GBTBackend):
             fit_cubic_spline_pcr=gbt_backend_cuda11x.interp.fit_cubic_spline_pcr,
             CubicSplineWrap=gbt_backend_cuda11x.interp.CubicSplineWrapGPU,
             CubicSpline=gbt_backend_cuda11x.interp.CubicSplineGPU,
+            interpolate_quintic_wrap=gbt_backend_cuda11x.interp.interpolate_quintic_wrap,
+            QuinticSplineWrap=gbt_backend_cuda11x.interp.QuinticSplineWrapGPU,
+            QuinticSpline=gbt_backend_cuda11x.interp.QuinticSplineGPU,
             xp=cupy,
         )
 
@@ -136,6 +153,9 @@ class GBTCuda12xBackend(Cuda12xBackend, GBTBackend):
             fit_cubic_spline_pcr=gbt_backend_cuda12x.interp.fit_cubic_spline_pcr,
             CubicSplineWrap=gbt_backend_cuda12x.interp.CubicSplineWrapGPU,
             CubicSpline=gbt_backend_cuda12x.interp.CubicSplineGPU,
+            interpolate_quintic_wrap=gbt_backend_cuda12x.interp.interpolate_quintic_wrap,
+            QuinticSplineWrap=gbt_backend_cuda12x.interp.QuinticSplineWrapGPU,
+            QuinticSpline=gbt_backend_cuda12x.interp.QuinticSplineGPU,
             xp=cupy,
         )
 
@@ -172,6 +192,9 @@ class GBTCuda13xBackend(Cuda13xBackend, GBTBackend):
             fit_cubic_spline_pcr=gbt_backend_cuda13x.interp.fit_cubic_spline_pcr,
             CubicSplineWrap=gbt_backend_cuda13x.interp.CubicSplineWrapGPU,
             CubicSpline=gbt_backend_cuda13x.interp.CubicSplineGPU,
+            interpolate_quintic_wrap=gbt_backend_cuda13x.interp.interpolate_quintic_wrap,
+            QuinticSplineWrap=gbt_backend_cuda13x.interp.QuinticSplineWrapGPU,
+            QuinticSpline=gbt_backend_cuda13x.interp.QuinticSplineGPU,
             xp=cupy,
         )
 

@@ -25,6 +25,18 @@ void CubicSplineWrap::eval_wrap_func(array_type<double>y_new, array_type<double>
 }
 
 
+void QuinticSplineWrap::eval_wrap_func(array_type<double>y_new, array_type<double>x_new, array_type<int>spline_index, int N)
+{
+    eval_quintic_wrap(
+        spline,
+        CubicSplineWrap::return_pointer_and_check_length(y_new, "y_new", N, 1),
+        CubicSplineWrap::return_pointer_and_check_length(x_new, "x_new", N, 1),
+        CubicSplineWrap::return_pointer_and_check_length(spline_index, "spline_index", N, 1),
+        N
+    );
+}
+
+
 void check_spline(CubicSpline *spline)
 {
     printf("%e\n", spline->x0[0]);
@@ -41,6 +53,24 @@ void interpolate_wrap(array_type<double>x, array_type<double>propArrays,
         CubicSplineWrap::return_pointer_and_check_length(upper_diag, "upper_diag", length, ninterps),
         CubicSplineWrap::return_pointer_and_check_length(diag, "diag", length, ninterps),
         CubicSplineWrap::return_pointer_and_check_length(lower_diag, "lower_diag", length, ninterps),
+        length,
+        ninterps
+    );
+}
+
+void interpolate_quintic_wrap(array_type<double> x, array_type<double> y,
+                 array_type<double> c1, array_type<double> c2, array_type<double> c3,
+                 array_type<double> c4, array_type<double> c5,
+                 int length, int ninterps)
+{
+    interpolate_quintic(
+        CubicSplineWrap::return_pointer_and_check_length(x, "x", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(y, "y", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(c1, "c1", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(c2, "c2", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(c3, "c3", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(c4, "c4", length, ninterps),
+        CubicSplineWrap::return_pointer_and_check_length(c5, "c5", length, ninterps),
         length,
         ninterps
     );
@@ -138,6 +168,24 @@ void spline_part(nb::module_ &m) {
 #else
     nb::class_<CubicSpline>(m, "CubicSplineCPU");
 #endif
+
+    // ---- Quintic spline wrapper (5 coefficient arrays) ----
+#if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
+    nb::class_<QuinticSplineWrap>(m, "QuinticSplineWrapGPU")
+#else
+    nb::class_<QuinticSplineWrap>(m, "QuinticSplineWrapCPU")
+#endif
+    .def(nb::init<array_type<double>, array_type<double>, array_type<double>, array_type<double>, array_type<double>, array_type<double>, array_type<double>, int, int, int>(),
+         nb::arg("x0"), nb::arg("y0"), nb::arg("c1"), nb::arg("c2"), nb::arg("c3"), nb::arg("c4"), nb::arg("c5"), nb::arg("ninterps"), nb::arg("length"), nb::arg("spline_type"))
+    .def("eval_wrap", &QuinticSplineWrap::eval_wrap_func, "Evaluate quintic splines.")
+    .def_rw("spline", &QuinticSplineWrap::spline)
+    ;
+
+#if defined(__CUDA_COMPILATION__) || defined(__CUDACC__)
+    nb::class_<QuinticSpline>(m, "QuinticSplineGPU");
+#else
+    nb::class_<QuinticSpline>(m, "QuinticSplineCPU");
+#endif
 }
 
 
@@ -154,6 +202,7 @@ NB_MODULE(interp, m) {
     m.def("check_spline", &check_spline, "Make sure that we can insert spline properly.");
     m.def("get_module_path_cpp", &get_module_path_gbt, "Returns the file path of the module");
     m.def("interpolate_wrap", &interpolate_wrap, "Interpolate arrays.");
+    m.def("interpolate_quintic_wrap", &interpolate_quintic_wrap, "Quintic (k=5) interpolation: fill c1..c5 from (x, y).");
 #if !defined(__CUDA_COMPILATION__) && !defined(__CUDACC__)
     m.def("fit_cubic_spline_thomas", &fit_cubic_spline_thomas_wrap,
           "(CPU-only) Fit a single cubic spline via the Thomas algorithm (in place; fills c1, c2, c3).");

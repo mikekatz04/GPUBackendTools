@@ -1216,188 +1216,249 @@ void set_quintic_constants(double *x, double *coef,
 
 #ifdef __CUDACC__
 // ===========================================================================
-// GPU SPIKE solve: 3 kernels parallel over (spline, chunk) using GLOBAL scratch
-// (no shared memory yet -- spec v1 "keep global W"; shared-memory fusion is a
-// follow-up). Mirrors the CPU spike_solve_one phases. Single-level reduced solve
-// (one thread per spline); GPU two-level recursion is a follow-up.
+// GPU SPIKE solve: host-recursive launcher that MIRRORS quintic_spike_batched
+// (the CPU driver in the #ifndef block) phase-for-phase, calling the SAME
+// per-chunk CUDA_DEVICE helpers (qspike_factor_chunk / _assemble_reduced_chunk /
+// _backsub_chunk + banfac_local/banslv_local). The only difference vs the CPU
+// path is parallelism: a block per (system, chunk) for phases 1 & 3, a thread
+// per system for the direct (single-chunk / base-case reduced) solves, and the
+// reduced system solved by the same host launcher re-entered recursively.
 //
 // !!! UNVERIFIED: this machine has no nvcc/GPU, so the device code below has
 // never been compiled or run. It is a faithful mirror of the CPU reference
 // (which IS verified vs scipy). Build + run tests on a CUDA box before trusting.
 //
-// Scratch layouts (P chunks of C rows, half-band m, reduced half-band Mred=3m,
-// reduced order R = 2(P-1)m):
-//   Dg : [sp][chunk] contiguous (2m+1)*C diagonal band   (factored in place)
-//   gg : [sp][row]                                        (local solutions g_j)
-//   Vg/Wg : [sp][chunk][b][c] contiguous in c            (right/left spikes)
-//   wrg/rrg : [sp] reduced band / rhs
-// Interleaved reduced positions (closed form, same for all splines):
-//   pos_t(j) = (2j-1)m  (j>=1) ;  pos_b(j) = (j==0)?0:2jm  (j<=P-2)
+// Per-system scratch (contiguous, packed by GLOBAL row -- identical layout to the
+// CPU mirror; no per-chunk Cmax over-allocation):
+//   cb[sys*bandrows*n + br*n + col]  contiguous band (half-band m, order n)
+//   rb[sys*n + col]                  rhs, overwritten with the solution
+//   g [sys*n + row]                  local solutions g_j
+//   V [sys*m*n + b*n + row]          right spikes, column-contiguous
+//   W [sys*m*n + b*n + row]          left  spikes, column-contiguous
+//   wr[sys*(2Mred+1)*R + ...]        reduced band (half-band Mred=3m, order R)
+//   rr[sys*R + ...]                  reduced rhs
+// The reduced band wr (per-system stride (2Mred+1)*R) is EXACTLY the cb of the
+// recursive call (bandrows'=2Mred+1, n'=R, m'=Mred), rr its rb -- so the recursion
+// is a clean batched re-entry with nsys constant across levels.
+//
+// qsp_pos_t / qsp_pos_b are shared (defined ONCE outside this guard).
 // ===========================================================================
-CUDA_DEVICE int qsp_pos_t(int j, int m) { return (2 * j - 1) * m; }
-CUDA_DEVICE int qsp_pos_b(int j, int m) { return (j == 0) ? 0 : (2 * j * m); }
 
-// Per-chunk global slices are fixed-size at Cmax = 2*C because the last chunk
-// absorbs the remainder (nj in [C, 2C)). D internal row-stride stays nj; only
-// the slice offsets/strides use Cmax. (The CPU reference is safe via per-nj new.)
+#define QSPIKE_SMEM_BYTES (96 * 1024)   // per-block dynamic-smem ceiling for the chunk band
+
+// Direct banded solve, one thread per system: banfac_local + banslv_local on the
+// full system. Used for P==1 and for the base case of the reduced solve.
 CUDA_KERNEL
-void spike_factor_kernel(double *W, double *B, double *Dg, double *gg,
-                         double *Vg, double *Wg, int ninterps, int length,
-                         int C, int Cmax, int P, int m)
+void qspike_direct_solve_kernel(double *cb, double *rb, int nsys, int n, int m)
 {
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int sp = blockIdx.y;
-    if (sp >= ninterps || j >= P) return;
-    int s = j * C;
-    int e = (j < P - 1) ? (s + C) : length;
-    int nj = e - s;
-
-    double *D = &Dg[(size_t)(sp * P + j) * (2 * m + 1) * Cmax];   // factor diagonal block (coupling rows zeroed)
-    for (int br = 0; br <= 2 * m; ++br)
-        for (int c = 0; c < nj; ++c)
-        {
-            int row = (s + c) + (br - m);
-            D[br * nj + c] = (row >= s && row < e) ? QBAND(W, br, s + c, sp, ninterps, length) : 0.0;
-        }
-    banfac_local(D, m, nj);
-
-    double *gj = &gg[(size_t)sp * length + s];                    // g_j = D_j^{-1} f_j
-    for (int c = 0; c < nj; ++c) gj[c] = QRHS(B, s + c, sp, ninterps);
-    banslv_local(D, m, nj, gj);
-
-    if (j < P - 1)                                                // right spike: bottom m rows = Sup_j
-        for (int b = 0; b < m; ++b)
-        {
-            double *col = &Vg[((size_t)(sp * P + j) * m + b) * Cmax];
-            for (int c = 0; c < nj; ++c) col[c] = 0.0;
-            for (int a = b; a < m; ++a) col[nj - m + a] = QBAND(W, a - b, e + b, sp, ninterps, length);
-            banslv_local(D, m, nj, col);
-        }
-    if (j > 0)                                                    // left spike: top m rows = Sub_j
-        for (int b = 0; b < m; ++b)
-        {
-            double *col = &Wg[((size_t)(sp * P + j) * m + b) * Cmax];
-            for (int c = 0; c < nj; ++c) col[c] = 0.0;
-            for (int a = 0; a <= b; ++a) col[a] = QBAND(W, 2 * m + a - b, s - m + b, sp, ninterps, length);
-            banslv_local(D, m, nj, col);
-        }
+    int bandrows = 2 * m + 1;
+    int sys = blockIdx.x * blockDim.x + threadIdx.x;
+    if (sys >= nsys) return;
+    double *A = &cb[(size_t)sys * bandrows * n];
+    banfac_local(A, m, n);
+    banslv_local(A, m, n, &rb[(size_t)sys * n]);
 }
 
+// Phase 1 (block per (system, chunk)): factor chunk j of system sys and assemble
+// its disjoint rows of the reduced system. grid = dim3(P, nsys): chunk j on x,
+// system sys on y. The chunk band sD lives in dynamic __shared__ when it fits the
+// smem budget (sDg == nullptr), else in a global per-block slice of sDg indexed by
+// (blockIdx.y*P + blockIdx.x). Either way the band buffer is private to the block,
+// so the two storage choices give bit-identical results. The serial banded factor
+// runs under THREAD_ZERO (v1: one thread does the chunk; other threads idle). All
+// (sys,chunk) blocks write DISJOINT g/V/W ranges and DISJOINT reduced rows (chunk j
+// owns reduced rows pos_t(j)/pos_b(j)), so there are no cross-block races; wr is
+// pre-zeroed by cudaMemset before launch.
 CUDA_KERNEL
-void spike_reduced_kernel(double *gg, double *Vg, double *Wg, double *wrg, double *rrg,
-                          int ninterps, int length, int C, int Cmax, int P, int m, int Mred, int R)
+void qspike_factor_kernel(const double *cb, const double *rb, double *g, double *V,
+                          double *W, double *wr, double *rr, double *sDg,
+                          int nsys, int n, int m, int C, int P, int Mred, int R,
+                          int nj_max)
 {
-    int sp = blockIdx.x * blockDim.x + threadIdx.x;
-    if (sp >= ninterps) return;
-    double *wr = &wrg[(size_t)sp * (2 * Mred + 1) * R];
-    double *rr = &rrg[(size_t)sp * R];
-    for (size_t t = 0; t < (size_t)(2 * Mred + 1) * R; ++t) wr[t] = 0.0;
-
-    for (int j = 0; j < P; ++j)
-    {
-        int s = j * C;
-        int e = (j < P - 1) ? (s + C) : length;
-        int nj = e - s;
-        double *gj = &gg[(size_t)sp * length + s];
-        double *Vj = &Vg[(size_t)(sp * P + j) * m * Cmax];      // Vj[b*Cmax + c]
-        double *Wj = &Wg[(size_t)(sp * P + j) * m * Cmax];
-
-        if (j >= 1)                                              // top equation
-        {
-            int p = qsp_pos_t(j, m);
-            for (int a = 0; a < m; ++a) { wr[(size_t)Mred * R + (p + a)] += 1.0; rr[p + a] = gj[a]; }
-            if (j < P - 1)
-            {
-                int cp = qsp_pos_t(j + 1, m);
-                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
-                    wr[(size_t)(Mred + (p + a) - (cp + b)) * R + (cp + b)] += Vj[b * Cmax + a];
-            }
-            int cw = qsp_pos_b(j - 1, m);
-            for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
-                wr[(size_t)(Mred + (p + a) - (cw + b)) * R + (cw + b)] += Wj[b * Cmax + a];
-        }
-        if (j < P - 1)                                          // bottom equation
-        {
-            int p = qsp_pos_b(j, m);
-            for (int a = 0; a < m; ++a) { wr[(size_t)Mred * R + (p + a)] += 1.0; rr[p + a] = gj[nj - m + a]; }
-            int cv = qsp_pos_t(j + 1, m);
-            for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
-                wr[(size_t)(Mred + (p + a) - (cv + b)) * R + (cv + b)] += Vj[b * Cmax + (nj - m + a)];
-            if (j >= 1)
-            {
-                int cw = qsp_pos_b(j - 1, m);
-                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
-                    wr[(size_t)(Mred + (p + a) - (cw + b)) * R + (cw + b)] += Wj[b * Cmax + (nj - m + a)];
-            }
-        }
-    }
-    banfac_local(wr, Mred, R);
-    banslv_local(wr, Mred, R, rr);                              // single-level (no GPU recursion yet)
-}
-
-CUDA_KERNEL
-void spike_backsub_kernel(double *B, double *gg, double *Vg, double *Wg, double *rrg,
-                          int ninterps, int length, int C, int Cmax, int P, int m, int R)
-{
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int sp = blockIdx.y;
-    if (sp >= ninterps || j >= P) return;
+    extern __shared__ double smem[];
+    int j = blockIdx.x;
+    int sys = blockIdx.y;
+    if (j >= P || sys >= nsys) return;
+    int bandrows = 2 * m + 1;
     int s = j * C;
-    int e = (j < P - 1) ? (s + C) : length;
+    int e = (j < P - 1) ? (s + C) : n;
     int nj = e - s;
-    double *gj = &gg[(size_t)sp * length + s];
-    double *Vj = &Vg[(size_t)(sp * P + j) * m * Cmax];
-    double *Wj = &Wg[(size_t)(sp * P + j) * m * Cmax];
-    double *rr = (R > 0) ? &rrg[(size_t)sp * R] : (double *)0;
-    for (int c = 0; c < nj; ++c)
+
+    // chunk band scratch: dynamic shared (preferred) or a per-block global slice.
+    double *sD = (sDg != nullptr)
+                     ? &sDg[((size_t)blockIdx.y * P + blockIdx.x) * bandrows * nj_max]
+                     : smem;
+
+    if (THREAD_ZERO)
     {
-        double x = gj[c];
-        if (j < P - 1) { int cp = qsp_pos_t(j + 1, m); for (int b = 0; b < m; ++b) x -= Vj[b * Cmax + c] * rr[cp + b]; }
-        if (j > 0)     { int cp = qsp_pos_b(j - 1, m); for (int b = 0; b < m; ++b) x -= Wj[b * Cmax + c] * rr[cp + b]; }
-        QRHS(B, s + c, sp, ninterps) = x;
+        const double *cbs = &cb[(size_t)sys * bandrows * n];
+        const double *rbs = &rb[(size_t)sys * n];
+        double *gs  = &g[(size_t)sys * n];
+        double *Vs  = &V[(size_t)sys * m * n];
+        double *Ws  = &W[(size_t)sys * m * n];
+        double *wrs = &wr[(size_t)sys * (2 * Mred + 1) * R];
+        double *rrs = &rr[(size_t)sys * R];
+        qspike_factor_chunk(cbs, n, m, s, nj, j, P, sD, rbs, gs, Vs, Ws);
+        qspike_assemble_reduced_chunk(gs, Vs, Ws, wrs, rrs, n, m, R, Mred, j, P, s, nj);
     }
 }
 
-// Host launcher (GPU). Allocates global scratch, runs the 3 phases, frees.
+// Phase 3 (block per (system, chunk)): back-substitute chunk j of system sys using
+// the reduced solution rr. No band access -> no shared memory. Disjoint writes
+// (each chunk owns rows [s, s+nj) of rb).
+CUDA_KERNEL
+void qspike_backsub_kernel(double *rb, const double *g, const double *V,
+                           const double *W, const double *rr,
+                           int nsys, int n, int m, int C, int P, int R)
+{
+    int j = blockIdx.x;
+    int sys = blockIdx.y;
+    if (j >= P || sys >= nsys) return;
+    if (!THREAD_ZERO) return;
+    int s = j * C;
+    int e = (j < P - 1) ? (s + C) : n;
+    int nj = e - s;
+    qspike_backsub_chunk(&rb[(size_t)sys * n], n, m, &g[(size_t)sys * n],
+                         &V[(size_t)sys * m * n], &W[(size_t)sys * m * n],
+                         &rr[(size_t)sys * R], j, P, s, nj);
+}
+
+// Host-recursive batched SPIKE launcher (GPU). MIRRORS quintic_spike_batched: same
+// chunking, same phases, same recurse-iff-shrinks decision. Host code only does
+// cudaMalloc/memset/launch/sync/free and the R>C decision -- every CUDA_DEVICE call
+// happens inside a kernel. cb/rb are device pointers (per-system contiguous band /
+// rhs); rb is overwritten with the solution.
+void qspike_solve_gpu_batched(double *cb, double *rb, int nsys, int n, int m, int Creq)
+{
+    int C = qspike_chunk_size(m, Creq);
+    int P = qspike_num_chunks(n, C, m);
+    int bandrows = 2 * m + 1;
+    int T = NUM_THREADS_INTERPOLATE;
+
+    if (P == 1)                                         // single chunk: direct banded solve
+    {
+        qspike_direct_solve_kernel<<<(nsys + T - 1) / T, T>>>(cb, rb, nsys, n, m);
+        cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
+        return;
+    }
+
+    int Mred = 3 * m;
+    int R = 2 * (P - 1) * m;
+    int last = n - (P - 1) * C;                         // size of the final (largest) chunk
+    int nj_max = (last > C) ? last : C;                 // < C + 2m -> bounds the chunk band
+
+    double *g, *V, *W, *wr, *rr;
+    gpuErrchk(cudaMalloc(&g,  (size_t)nsys * n * sizeof(double)));
+    gpuErrchk(cudaMalloc(&V,  (size_t)nsys * m * n * sizeof(double)));
+    gpuErrchk(cudaMalloc(&W,  (size_t)nsys * m * n * sizeof(double)));
+    gpuErrchk(cudaMalloc(&wr, (size_t)nsys * (2 * Mred + 1) * R * sizeof(double)));
+    gpuErrchk(cudaMalloc(&rr, (size_t)nsys * R * sizeof(double)));
+    gpuErrchk(cudaMemset(wr, 0, (size_t)nsys * (2 * Mred + 1) * R * sizeof(double)));   // reduced band pre-zeroed
+
+    // --- phase 1: factor + assemble reduced, block per (system, chunk) ---
+    // Shared-vs-global chunk band decision: prefer dynamic __shared__ when the
+    // largest chunk band (bandrows*nj_max doubles) fits the per-block ceiling. The
+    // long-spline production path (large C at the shallow levels) uses shared mem;
+    // only levels whose chunk band exceeds the ceiling fall back to a global slice
+    // (identical results, just slower memory). The decision is per launch (per
+    // recursion level), since m grows (Mred=3m) and C shrinks toward the base case.
+    size_t smem = (size_t)bandrows * nj_max * sizeof(double);
+    dim3 grid(P, nsys);
+    double *sDg = nullptr;
+    if (smem <= (size_t)QSPIKE_SMEM_BYTES)
+    {
+        if (smem > 48 * 1024)
+            gpuErrchk(cudaFuncSetAttribute(qspike_factor_kernel,
+                                           cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                           (int)smem));
+        qspike_factor_kernel<<<grid, T, smem>>>(cb, rb, g, V, W, wr, rr, nullptr,
+                                                nsys, n, m, C, P, Mred, R, nj_max);
+    }
+    else                                                // chunk band too big for smem -> global per-block slice
+    {
+        gpuErrchk(cudaMalloc(&sDg, (size_t)P * nsys * bandrows * nj_max * sizeof(double)));
+        qspike_factor_kernel<<<grid, T>>>(cb, rb, g, V, W, wr, rr, sDg,
+                                          nsys, n, m, C, P, Mred, R, nj_max);
+    }
+    cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
+    if (sDg) gpuErrchk(cudaFree(sDg));
+
+    // --- phase 2: reduced solve (recurse iff it shrinks, else direct base case) ---
+    if (R > C && 2 * R <= n)
+        qspike_solve_gpu_batched(wr, rr, nsys, R, Mred, Creq);
+    else
+    {
+        qspike_direct_solve_kernel<<<(nsys + T - 1) / T, T>>>(wr, rr, nsys, R, Mred);
+        cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
+    }
+
+    // --- phase 3: back-substitute, block per (system, chunk) ---
+    qspike_backsub_kernel<<<grid, T>>>(rb, g, V, W, rr, nsys, n, m, C, P, R);
+    cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
+
+    gpuErrchk(cudaFree(g)); gpuErrchk(cudaFree(V)); gpuErrchk(cudaFree(W));
+    gpuErrchk(cudaFree(wr)); gpuErrchk(cudaFree(rr));
+}
+
+// Gather each spline's QBAND band + QRHS rhs into the contiguous batched buffers
+// cb0/rb0 (the layout qspike_solve_gpu_batched expects). grid = dim3(systems-on-x,
+// columns-on-threads); one block per system, threads stride over columns so the
+// QBAND reads coalesce across threads. Each thread copies all QUINTIC_BAND_ROWS
+// rows of its column plus the rhs.
+CUDA_KERNEL
+void qspike_gather_kernel(const double *W, const double *B, double *cb0, double *rb0,
+                          int ninterps, int length)
+{
+    int bandrows = QUINTIC_BAND_ROWS;
+    for (int sys = BLOCK_START_X; sys < ninterps; sys += GRID_INCR_X)
+    {
+        double *cbs = &cb0[(size_t)sys * bandrows * length];
+        double *rbs = &rb0[(size_t)sys * length];
+        for (int c = THREAD_START_X; c < length; c += BLOCK_INCR_X)
+        {
+            for (int br = 0; br < bandrows; ++br)
+                cbs[(size_t)br * length + c] = QBAND(W, br, c, sys, ninterps, length);
+            rbs[c] = QRHS(B, c, sys, ninterps);
+        }
+    }
+}
+
+// Scatter the solved rhs rb0 back into the global QRHS layout B.
+CUDA_KERNEL
+void qspike_scatter_kernel(double *B, const double *rb0, int ninterps, int length)
+{
+    for (int sys = BLOCK_START_X; sys < ninterps; sys += GRID_INCR_X)
+    {
+        const double *rbs = &rb0[(size_t)sys * length];
+        for (int c = THREAD_START_X; c < length; c += BLOCK_INCR_X)
+            QRHS(B, c, sys, ninterps) = rbs[c];
+    }
+}
+
+// Host entry called by interpolate_quintic. Gathers QBAND/QRHS -> contiguous
+// batched cb0/rb0, runs the recursive batched SPIKE solver, scatters back.
 void quintic_spike_solve_gpu(double *W, double *B, int ninterps, int length, int chunk, int uniform)
 {
     (void)uniform;                                  // Toeplitz cache is a GPU follow-up
     int m = QUINTIC_HALF_BAND;
-    int C = (chunk > 0) ? chunk : 1024;
-    if (C < 2 * m) C = 2 * m;
-    if (C > length) C = length;
-    int P = length / C; if (P < 1) P = 1;
-    int Cmax = 2 * C;                               // last chunk absorbs remainder -> nj in [C, 2C)
-    int Mred = 3 * m;
-    int R = (P > 1) ? (2 * (P - 1) * m) : 0;
+    int bandrows = QUINTIC_BAND_ROWS;
+    int Creq = (chunk > 0) ? chunk : QSPIKE_DEFAULT_C;   // GPU default: 1024 (saturate the device)
     int T = NUM_THREADS_INTERPOLATE;
 
-    double *Dg, *gg, *Vg, *Wg, *wrg = 0, *rrg = 0;
-    gpuErrchk(cudaMalloc(&Dg, (size_t)ninterps * P * (2 * m + 1) * Cmax * sizeof(double)));
-    gpuErrchk(cudaMalloc(&gg, (size_t)ninterps * length * sizeof(double)));
-    gpuErrchk(cudaMalloc(&Vg, (size_t)ninterps * P * m * Cmax * sizeof(double)));
-    gpuErrchk(cudaMalloc(&Wg, (size_t)ninterps * P * m * Cmax * sizeof(double)));
-    if (P > 1)
-    {
-        gpuErrchk(cudaMalloc(&wrg, (size_t)ninterps * (2 * Mred + 1) * R * sizeof(double)));
-        gpuErrchk(cudaMalloc(&rrg, (size_t)ninterps * R * sizeof(double)));
-    }
+    double *cb0, *rb0;
+    gpuErrchk(cudaMalloc(&cb0, (size_t)ninterps * bandrows * length * sizeof(double)));
+    gpuErrchk(cudaMalloc(&rb0, (size_t)ninterps * length * sizeof(double)));
 
-    dim3 grid((P + T - 1) / T, ninterps);
-    spike_factor_kernel<<<grid, T>>>(W, B, Dg, gg, Vg, Wg, ninterps, length, C, Cmax, P, m);
-    cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
-    if (P > 1)
-    {
-        spike_reduced_kernel<<<(ninterps + T - 1) / T, T>>>(gg, Vg, Wg, wrg, rrg, ninterps, length, C, Cmax, P, m, Mred, R);
-        cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
-    }
-    spike_backsub_kernel<<<grid, T>>>(B, gg, Vg, Wg, rrg, ninterps, length, C, Cmax, P, m, R);
+    int gblocks = (ninterps < 65535) ? ninterps : 65535;
+    qspike_gather_kernel<<<gblocks, T>>>(W, B, cb0, rb0, ninterps, length);
     cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
 
-    gpuErrchk(cudaFree(Dg)); gpuErrchk(cudaFree(gg));
-    gpuErrchk(cudaFree(Vg)); gpuErrchk(cudaFree(Wg));
-    if (wrg) gpuErrchk(cudaFree(wrg));
-    if (rrg) gpuErrchk(cudaFree(rrg));
+    qspike_solve_gpu_batched(cb0, rb0, ninterps, length, m, Creq);
+
+    qspike_scatter_kernel<<<gblocks, T>>>(B, rb0, ninterps, length);
+    cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
+
+    gpuErrchk(cudaFree(cb0)); gpuErrchk(cudaFree(rb0));
 }
 #endif // __CUDACC__
 

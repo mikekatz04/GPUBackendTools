@@ -1180,6 +1180,193 @@ void set_quintic_constants(double *x, double *coef,
     }
 }
 
+#ifdef __CUDACC__
+// ===========================================================================
+// GPU SPIKE solve: 3 kernels parallel over (spline, chunk) using GLOBAL scratch
+// (no shared memory yet -- spec v1 "keep global W"; shared-memory fusion is a
+// follow-up). Mirrors the CPU spike_solve_one phases. Single-level reduced solve
+// (one thread per spline); GPU two-level recursion is a follow-up.
+//
+// !!! UNVERIFIED: this machine has no nvcc/GPU, so the device code below has
+// never been compiled or run. It is a faithful mirror of the CPU reference
+// (which IS verified vs scipy). Build + run tests on a CUDA box before trusting.
+//
+// Scratch layouts (P chunks of C rows, half-band m, reduced half-band Mred=3m,
+// reduced order R = 2(P-1)m):
+//   Dg : [sp][chunk] contiguous (2m+1)*C diagonal band   (factored in place)
+//   gg : [sp][row]                                        (local solutions g_j)
+//   Vg/Wg : [sp][chunk][b][c] contiguous in c            (right/left spikes)
+//   wrg/rrg : [sp] reduced band / rhs
+// Interleaved reduced positions (closed form, same for all splines):
+//   pos_t(j) = (2j-1)m  (j>=1) ;  pos_b(j) = (j==0)?0:2jm  (j<=P-2)
+// ===========================================================================
+CUDA_DEVICE int qsp_pos_t(int j, int m) { return (2 * j - 1) * m; }
+CUDA_DEVICE int qsp_pos_b(int j, int m) { return (j == 0) ? 0 : (2 * j * m); }
+
+// Per-chunk global slices are fixed-size at Cmax = 2*C because the last chunk
+// absorbs the remainder (nj in [C, 2C)). D internal row-stride stays nj; only
+// the slice offsets/strides use Cmax. (The CPU reference is safe via per-nj new.)
+CUDA_KERNEL
+void spike_factor_kernel(double *W, double *B, double *Dg, double *gg,
+                         double *Vg, double *Wg, int ninterps, int length,
+                         int C, int Cmax, int P, int m)
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int sp = blockIdx.y;
+    if (sp >= ninterps || j >= P) return;
+    int s = j * C;
+    int e = (j < P - 1) ? (s + C) : length;
+    int nj = e - s;
+
+    double *D = &Dg[(size_t)(sp * P + j) * (2 * m + 1) * Cmax];   // factor diagonal block (coupling rows zeroed)
+    for (int br = 0; br <= 2 * m; ++br)
+        for (int c = 0; c < nj; ++c)
+        {
+            int row = (s + c) + (br - m);
+            D[br * nj + c] = (row >= s && row < e) ? QBAND(W, br, s + c, sp, ninterps, length) : 0.0;
+        }
+    banfac_local(D, m, nj);
+
+    double *gj = &gg[(size_t)sp * length + s];                    // g_j = D_j^{-1} f_j
+    for (int c = 0; c < nj; ++c) gj[c] = QRHS(B, s + c, sp, ninterps);
+    banslv_local(D, m, nj, gj);
+
+    if (j < P - 1)                                                // right spike: bottom m rows = Sup_j
+        for (int b = 0; b < m; ++b)
+        {
+            double *col = &Vg[((size_t)(sp * P + j) * m + b) * Cmax];
+            for (int c = 0; c < nj; ++c) col[c] = 0.0;
+            for (int a = b; a < m; ++a) col[nj - m + a] = QBAND(W, a - b, e + b, sp, ninterps, length);
+            banslv_local(D, m, nj, col);
+        }
+    if (j > 0)                                                    // left spike: top m rows = Sub_j
+        for (int b = 0; b < m; ++b)
+        {
+            double *col = &Wg[((size_t)(sp * P + j) * m + b) * Cmax];
+            for (int c = 0; c < nj; ++c) col[c] = 0.0;
+            for (int a = 0; a <= b; ++a) col[a] = QBAND(W, 2 * m + a - b, s - m + b, sp, ninterps, length);
+            banslv_local(D, m, nj, col);
+        }
+}
+
+CUDA_KERNEL
+void spike_reduced_kernel(double *gg, double *Vg, double *Wg, double *wrg, double *rrg,
+                          int ninterps, int length, int C, int Cmax, int P, int m, int Mred, int R)
+{
+    int sp = blockIdx.x * blockDim.x + threadIdx.x;
+    if (sp >= ninterps) return;
+    double *wr = &wrg[(size_t)sp * (2 * Mred + 1) * R];
+    double *rr = &rrg[(size_t)sp * R];
+    for (size_t t = 0; t < (size_t)(2 * Mred + 1) * R; ++t) wr[t] = 0.0;
+
+    for (int j = 0; j < P; ++j)
+    {
+        int s = j * C;
+        int e = (j < P - 1) ? (s + C) : length;
+        int nj = e - s;
+        double *gj = &gg[(size_t)sp * length + s];
+        double *Vj = &Vg[(size_t)(sp * P + j) * m * Cmax];      // Vj[b*Cmax + c]
+        double *Wj = &Wg[(size_t)(sp * P + j) * m * Cmax];
+
+        if (j >= 1)                                              // top equation
+        {
+            int p = qsp_pos_t(j, m);
+            for (int a = 0; a < m; ++a) { wr[(size_t)Mred * R + (p + a)] += 1.0; rr[p + a] = gj[a]; }
+            if (j < P - 1)
+            {
+                int cp = qsp_pos_t(j + 1, m);
+                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                    wr[(size_t)(Mred + (p + a) - (cp + b)) * R + (cp + b)] += Vj[b * Cmax + a];
+            }
+            int cw = qsp_pos_b(j - 1, m);
+            for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                wr[(size_t)(Mred + (p + a) - (cw + b)) * R + (cw + b)] += Wj[b * Cmax + a];
+        }
+        if (j < P - 1)                                          // bottom equation
+        {
+            int p = qsp_pos_b(j, m);
+            for (int a = 0; a < m; ++a) { wr[(size_t)Mred * R + (p + a)] += 1.0; rr[p + a] = gj[nj - m + a]; }
+            int cv = qsp_pos_t(j + 1, m);
+            for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                wr[(size_t)(Mred + (p + a) - (cv + b)) * R + (cv + b)] += Vj[b * Cmax + (nj - m + a)];
+            if (j >= 1)
+            {
+                int cw = qsp_pos_b(j - 1, m);
+                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                    wr[(size_t)(Mred + (p + a) - (cw + b)) * R + (cw + b)] += Wj[b * Cmax + (nj - m + a)];
+            }
+        }
+    }
+    banfac_local(wr, Mred, R);
+    banslv_local(wr, Mred, R, rr);                              // single-level (no GPU recursion yet)
+}
+
+CUDA_KERNEL
+void spike_backsub_kernel(double *B, double *gg, double *Vg, double *Wg, double *rrg,
+                          int ninterps, int length, int C, int Cmax, int P, int m, int R)
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int sp = blockIdx.y;
+    if (sp >= ninterps || j >= P) return;
+    int s = j * C;
+    int e = (j < P - 1) ? (s + C) : length;
+    int nj = e - s;
+    double *gj = &gg[(size_t)sp * length + s];
+    double *Vj = &Vg[(size_t)(sp * P + j) * m * Cmax];
+    double *Wj = &Wg[(size_t)(sp * P + j) * m * Cmax];
+    double *rr = (R > 0) ? &rrg[(size_t)sp * R] : (double *)0;
+    for (int c = 0; c < nj; ++c)
+    {
+        double x = gj[c];
+        if (j < P - 1) { int cp = qsp_pos_t(j + 1, m); for (int b = 0; b < m; ++b) x -= Vj[b * Cmax + c] * rr[cp + b]; }
+        if (j > 0)     { int cp = qsp_pos_b(j - 1, m); for (int b = 0; b < m; ++b) x -= Wj[b * Cmax + c] * rr[cp + b]; }
+        QRHS(B, s + c, sp, ninterps) = x;
+    }
+}
+
+// Host launcher (GPU). Allocates global scratch, runs the 3 phases, frees.
+void quintic_spike_solve_gpu(double *W, double *B, int ninterps, int length, int chunk, int uniform)
+{
+    (void)uniform;                                  // Toeplitz cache is a GPU follow-up
+    int m = QUINTIC_HALF_BAND;
+    int C = (chunk > 0) ? chunk : 1024;
+    if (C < 2 * m) C = 2 * m;
+    if (C > length) C = length;
+    int P = length / C; if (P < 1) P = 1;
+    int Cmax = 2 * C;                               // last chunk absorbs remainder -> nj in [C, 2C)
+    int Mred = 3 * m;
+    int R = (P > 1) ? (2 * (P - 1) * m) : 0;
+    int T = NUM_THREADS_INTERPOLATE;
+
+    double *Dg, *gg, *Vg, *Wg, *wrg = 0, *rrg = 0;
+    gpuErrchk(cudaMalloc(&Dg, (size_t)ninterps * P * (2 * m + 1) * Cmax * sizeof(double)));
+    gpuErrchk(cudaMalloc(&gg, (size_t)ninterps * length * sizeof(double)));
+    gpuErrchk(cudaMalloc(&Vg, (size_t)ninterps * P * m * Cmax * sizeof(double)));
+    gpuErrchk(cudaMalloc(&Wg, (size_t)ninterps * P * m * Cmax * sizeof(double)));
+    if (P > 1)
+    {
+        gpuErrchk(cudaMalloc(&wrg, (size_t)ninterps * (2 * Mred + 1) * R * sizeof(double)));
+        gpuErrchk(cudaMalloc(&rrg, (size_t)ninterps * R * sizeof(double)));
+    }
+
+    dim3 grid((P + T - 1) / T, ninterps);
+    spike_factor_kernel<<<grid, T>>>(W, B, Dg, gg, Vg, Wg, ninterps, length, C, Cmax, P, m);
+    cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
+    if (P > 1)
+    {
+        spike_reduced_kernel<<<(ninterps + T - 1) / T, T>>>(gg, Vg, Wg, wrg, rrg, ninterps, length, C, Cmax, P, m, Mred, R);
+        cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
+    }
+    spike_backsub_kernel<<<grid, T>>>(B, gg, Vg, Wg, rrg, ninterps, length, C, Cmax, P, m, R);
+    cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
+
+    gpuErrchk(cudaFree(Dg)); gpuErrchk(cudaFree(gg));
+    gpuErrchk(cudaFree(Vg)); gpuErrchk(cudaFree(Wg));
+    if (wrg) gpuErrchk(cudaFree(wrg));
+    if (rrg) gpuErrchk(cudaFree(rrg));
+}
+#endif // __CUDACC__
+
 // Host orchestrator. Internally allocates the band scratch W (zeroed) and the
 // B-spline coefficient scratch B; fills c1..c5 in place.
 void interpolate_quintic(double *x, double *y,

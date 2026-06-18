@@ -877,12 +877,18 @@ static inline void red_add(double *wr, int Mred, int R, int i, int k, double v)
     wr[(size_t)(Mred + (i - k)) * R + k] += v;
 }
 
+static inline bool darr_eq(const double *a, const double *b, size_t k)
+{ for (size_t i = 0; i < k; ++i) if (a[i] != b[i]) return false; return true; }
+static inline void darr_cpy(double *d, const double *s, size_t k)
+{ for (size_t i = 0; i < k; ++i) d[i] = s[i]; }
+
 // Solve ONE banded system: contiguous band cb[br*n + col] (half-band m), rhs rb
 // (length n) overwritten with the solution. SPIKE partition into chunks of C
 // rows (>= 2m); reduced system assembled in interleaved physical order and
 // solved directly with the same banded primitives (Task 3 adds recursion).
 // Mirrors the validated NumPy reference (matches np.linalg.solve to ~1e-16).
-void spike_solve_one(double *cb, double *rb, int n, int m, int C)
+// uniform != 0 enables the Toeplitz factorization cache for interior chunks.
+void spike_solve_one(double *cb, double *rb, int n, int m, int C, int uniform)
 {
     if (C < 2 * m) C = 2 * m;
     int P = n / C;
@@ -898,11 +904,26 @@ void spike_solve_one(double *cb, double *rb, int n, int m, int C)
     double *Vs = new double[(size_t)n * m];       // right spikes, row-major [row*m + b]
     double *Ws = new double[(size_t)n * m];       // left spikes
 
+    // Uniform fast path: cache one interior full-size chunk's factorization +
+    // spikes and reuse for any later interior chunk whose band matches exactly
+    // (Toeplitz). Element-wise compare => always correct (mismatches recompute,
+    // so non-uniform input simply never reuses).
+    int band_sz = (2 * m + 1) * C;
+    double *cDraw = nullptr, *cDfac = nullptr, *cV = nullptr, *cW = nullptr, *cSup = nullptr, *cSub = nullptr;
+    bool have_cache = false;
+    if (uniform)
+    {
+        cDraw = new double[band_sz]; cDfac = new double[band_sz];
+        cV = new double[(size_t)C * m]; cW = new double[(size_t)C * m];
+        cSup = new double[m * m]; cSub = new double[m * m];
+    }
+
     for (int j = 0; j < P; ++j)
     {
         int s = j * C;
         int e = (j < P - 1) ? (s + C) : n;
         int nj = e - s;
+        bool interior = uniform && j > 0 && j < P - 1 && nj == C;
 
         double *D = new double[(size_t)(2 * m + 1) * nj];   // chunk diagonal block (coupling rows zeroed)
         for (int br = 0; br <= 2 * m; ++br)
@@ -911,6 +932,39 @@ void spike_solve_one(double *cb, double *rb, int n, int m, int C)
                 int row = (s + c) + (br - m);
                 D[br * nj + c] = (row >= s && row < e) ? cb[br * n + (s + c)] : 0.0;
             }
+
+        bool fill_cache = false;
+        if (interior)
+        {
+            double *sup = new double[m * m];
+            double *sub = new double[m * m];
+            for (int a = 0; a < m; ++a)
+                for (int b = 0; b < m; ++b)
+                {
+                    sup[a * m + b] = (b <= a) ? cb[(a - b) * n + (e + b)] : 0.0;
+                    sub[a * m + b] = (a <= b) ? cb[(2 * m + a - b) * n + (s - m + b)] : 0.0;
+                }
+            if (have_cache && darr_eq(D, cDraw, band_sz) &&
+                darr_eq(sup, cSup, (size_t)m * m) && darr_eq(sub, cSub, (size_t)m * m))
+            {
+                for (int c = 0; c < nj; ++c) g[s + c] = rb[s + c];
+                banslv_local(cDfac, m, nj, &g[s]);
+                for (int c = 0; c < nj; ++c)
+                    for (int b = 0; b < m; ++b)
+                    {
+                        Vs[(size_t)(s + c) * m + b] = cV[c * m + b];
+                        Ws[(size_t)(s + c) * m + b] = cW[c * m + b];
+                    }
+                delete[] sup; delete[] sub; delete[] D;
+                continue;
+            }
+            darr_cpy(cDraw, D, band_sz);
+            darr_cpy(cSup, sup, (size_t)m * m);
+            darr_cpy(cSub, sub, (size_t)m * m);
+            delete[] sup; delete[] sub;
+            fill_cache = true;
+        }
+
         banfac_local(D, m, nj);
 
         for (int c = 0; c < nj; ++c) g[s + c] = rb[s + c];
@@ -936,8 +990,21 @@ void spike_solve_one(double *cb, double *rb, int n, int m, int C)
                 for (int c = 0; c < nj; ++c) Ws[(size_t)(s + c) * m + b] = col[c];
                 delete[] col;
             }
+
+        if (fill_cache)                           // remember this interior chunk for reuse
+        {
+            darr_cpy(cDfac, D, band_sz);
+            for (int c = 0; c < C; ++c)
+                for (int b = 0; b < m; ++b)
+                {
+                    cV[c * m + b] = Vs[(size_t)(s + c) * m + b];
+                    cW[c * m + b] = Ws[(size_t)(s + c) * m + b];
+                }
+            have_cache = true;
+        }
         delete[] D;
     }
+    if (uniform) { delete[] cDraw; delete[] cDfac; delete[] cV; delete[] cW; delete[] cSup; delete[] cSub; }
 
     // Interleaved reduced unknowns: ("b",0),("t",1),("b",1),...,("t",P-1).
     int *pos_t = new int[P];
@@ -988,7 +1055,7 @@ void spike_solve_one(double *cb, double *rb, int n, int m, int C)
     // when that makes real progress (order at least halves); otherwise solve it
     // directly. (At C=2m the reduced order ~= n, so recursion would not shrink.)
     if (R > C && 2 * R <= n)
-        spike_solve_one(wr, rr, R, Mred, C);
+        spike_solve_one(wr, rr, R, Mred, C, 0);   // reduced system is not Toeplitz
     else
     {
         banfac_local(wr, Mred, R);
@@ -1018,7 +1085,7 @@ void spike_solve_one(double *cb, double *rb, int n, int m, int C)
 // Solve all splines: gather each spline's band (QBAND W) + rhs (QRHS B) into
 // contiguous buffers, SPIKE-solve, write the solution back into B. chunk<=0 =>
 // single chunk (CPU auto; the GPU shared-memory budget is set in Task 5).
-void quintic_spike_solve(double *W, double *B, int ninterps, int length, int chunk)
+void quintic_spike_solve(double *W, double *B, int ninterps, int length, int chunk, int uniform)
 {
     int m = QUINTIC_HALF_BAND;
     int C = (chunk > 0) ? chunk : length;
@@ -1028,7 +1095,7 @@ void quintic_spike_solve(double *W, double *B, int ninterps, int length, int chu
         band_gather(cb, W, s, ninterps, length, 0, length);
         double *rb = new double[length];
         for (int c = 0; c < length; ++c) rb[c] = QRHS(B, c, s, ninterps);
-        spike_solve_one(cb, rb, length, m, C);
+        spike_solve_one(cb, rb, length, m, C, uniform);
         for (int c = 0; c < length; ++c) QRHS(B, c, s, ninterps) = rb[c];
         delete[] cb; delete[] rb;
     }
@@ -1117,13 +1184,13 @@ void set_quintic_constants(double *x, double *coef,
 // B-spline coefficient scratch B; fills c1..c5 in place.
 void interpolate_quintic(double *x, double *y,
                          double *c1, double *c2, double *c3, double *c4, double *c5,
-                         int length, int ninterps, int chunk)
+                         int length, int ninterps, int chunk, int uniform)
 {
-    (void)chunk;  // Task 1: accepted + plumbed; consumed by quintic_spike_solve (Task 2).
     size_t band_count = (size_t)ninterps * QUINTIC_BAND_ROWS * (size_t)length;
     size_t rhs_count = (size_t)ninterps * (size_t)length;
 
 #ifdef __CUDACC__
+    (void)chunk; (void)uniform;   // GPU still uses the legacy solve (replaced in Task 5)
     int sblocks = std::ceil((ninterps + NUM_THREADS_INTERPOLATE - 1) / NUM_THREADS_INTERPOLATE);
 
     double *W;
@@ -1151,7 +1218,7 @@ void interpolate_quintic(double *x, double *y,
     double *B = new double[rhs_count];
 
     fill_quintic_band(x, y, W, B, ninterps, length);
-    quintic_spike_solve(W, B, ninterps, length, chunk);   // SPIKE chunked solve (Task 2)
+    quintic_spike_solve(W, B, ninterps, length, chunk, uniform);   // SPIKE chunked solve
     set_quintic_constants(x, B, c1, c2, c3, c4, c5, ninterps, length);
 
     delete[] W;

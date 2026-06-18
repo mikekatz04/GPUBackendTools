@@ -71,6 +71,12 @@ class SpikeSolveTest(unittest.TestCase):
     def test_two_level_reduced_nonuniform(self):
         self._check(n=400, ninterps=2, kind="random", chunk=20)
 
+    # Task 4: uniform grid exercises the LINEAR_SPACING Toeplitz cache path;
+    # result must still match scipy (cache is correctness-preserving).
+    def test_uniform_fastpath_matches_scipy(self):
+        self._check(n=300, ninterps=3, kind="uniform", chunk=16)
+        self._check(n=512, ninterps=1, kind="uniform", chunk=32)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -550,6 +550,7 @@ class QuinticSplineInterpolant(GBTParallelModuleBase):
                 self.length,
                 s1 - s0,
                 self._chunk,
+                1 if self.spline_type == CUBIC_SPLINE_LINEAR_SPACING else 0,
             )
 
     @property

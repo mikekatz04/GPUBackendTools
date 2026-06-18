@@ -984,8 +984,16 @@ void spike_solve_one(double *cb, double *rb, int n, int m, int C)
         }
     }
 
-    banfac_local(wr, Mred, R);
-    banslv_local(wr, Mred, R, rr);                // rr now holds the interface tips
+    // Solve the reduced system. It is itself banded (half-band Mred), so recurse
+    // when that makes real progress (order at least halves); otherwise solve it
+    // directly. (At C=2m the reduced order ~= n, so recursion would not shrink.)
+    if (R > C && 2 * R <= n)
+        spike_solve_one(wr, rr, R, Mred, C);
+    else
+    {
+        banfac_local(wr, Mred, R);
+        banslv_local(wr, Mred, R, rr);            // rr now holds the interface tips
+    }
 
     for (int j = 0; j < P; ++j)                   // x_j = g_j - V_j x_{j+1}^t - W_j x_{j-1}^b
     {

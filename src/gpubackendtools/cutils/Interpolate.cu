@@ -1376,10 +1376,10 @@ void interpolate_quintic(double *x, double *y,
     size_t band_count = (size_t)ninterps * QUINTIC_BAND_ROWS * (size_t)length;
     size_t rhs_count = (size_t)ninterps * (size_t)length;
 
+    // Default solve: SPIKE chunked/parallel banded solve. Define
+    // GBT_QUINTIC_LEGACY_SOLVE to fall back to the one-thread-per-spline solve
+    // (e.g. if the GPU SPIKE path needs validating against the legacy baseline).
 #ifdef __CUDACC__
-    (void)chunk; (void)uniform;   // GPU still uses the legacy solve (replaced in Task 5)
-    int sblocks = std::ceil((ninterps + NUM_THREADS_INTERPOLATE - 1) / NUM_THREADS_INTERPOLATE);
-
     double *W;
     double *B;
     gpuErrchk(cudaMalloc(&W, band_count * sizeof(double)));
@@ -1390,9 +1390,15 @@ void interpolate_quintic(double *x, double *y,
     cudaDeviceSynchronize();
     gpuErrchk(cudaGetLastError());
 
+#ifdef GBT_QUINTIC_LEGACY_SOLVE
+    (void)chunk; (void)uniform;
+    int sblocks = std::ceil((ninterps + NUM_THREADS_INTERPOLATE - 1) / NUM_THREADS_INTERPOLATE);
     solve_quintic_band_batch<<<sblocks, NUM_THREADS_INTERPOLATE>>>(W, B, ninterps, length);
     cudaDeviceSynchronize();
     gpuErrchk(cudaGetLastError());
+#else
+    quintic_spike_solve_gpu(W, B, ninterps, length, chunk, uniform);   // GPU SPIKE (UNVERIFIED)
+#endif
 
     set_quintic_constants<<<ninterps, NUM_THREADS_INTERPOLATE>>>(x, B, c1, c2, c3, c4, c5, ninterps, length);
     cudaDeviceSynchronize();
@@ -1405,7 +1411,12 @@ void interpolate_quintic(double *x, double *y,
     double *B = new double[rhs_count];
 
     fill_quintic_band(x, y, W, B, ninterps, length);
-    quintic_spike_solve(W, B, ninterps, length, chunk, uniform);   // SPIKE chunked solve
+#ifdef GBT_QUINTIC_LEGACY_SOLVE
+    (void)chunk; (void)uniform;
+    solve_quintic_band_batch(W, B, ninterps, length);
+#else
+    quintic_spike_solve(W, B, ninterps, length, chunk, uniform);   // CPU SPIKE (verified)
+#endif
     set_quintic_constants(x, B, c1, c2, c3, c4, c5, ninterps, length);
 
     delete[] W;

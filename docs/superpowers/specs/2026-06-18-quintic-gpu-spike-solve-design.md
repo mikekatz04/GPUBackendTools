@@ -37,10 +37,19 @@ This supersedes the rationale behind backlog #1 (whole-band-in-shared-memory, le
 - **Exact / drop-in**: still reproduce `scipy.interpolate.make_interp_spline(x,y,k=5)` to
   ≤1e-13. Output `c1..c5` layout unchanged → no API/Python/binding/eval change.
 
+**Core principle: CPU mirrors GPU exactly.** The SPIKE kernels are written once with
+`CUDA_KERNEL`/`CUDA_DEVICE`; the GPU parallelizes over `(spline, chunk)` while the CPU runs
+the **identical kernel bodies** with serial loops (`#ifdef __CUDACC__` only bridges the
+launch/index config, exactly like the existing `fill_quintic_band` /
+`solve_quintic_band_batch`). This is the verification vehicle: because the CPU path executes
+the *same* chunking, local factor, reduced-system, and back-substitution logic, the CPU test
+suite validates the parallel algorithm itself — not a different sequential solve.
+
 **Non-goals (v1)**
 - Fusing `fill` into the solve (keep materializing global band `W` for now).
-- Changing the CPU path (it keeps today's sequential solve under `#else`).
 - A log-grid Toeplitz path (log grids are non-uniform in `x` → general path).
+- The old one-thread-per-spline solve becomes an *optional* compile/flag-guarded fallback
+  only; the default tested path on **both** CPU and GPU is SPIKE.
 
 ## Approach: unified chunked / SPIKE-style banded solve
 

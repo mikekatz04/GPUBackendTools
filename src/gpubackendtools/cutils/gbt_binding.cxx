@@ -61,7 +61,7 @@ void interpolate_wrap(array_type<double>x, array_type<double>propArrays,
 void interpolate_quintic_wrap(array_type<double> x, array_type<double> y,
                  array_type<double> c1, array_type<double> c2, array_type<double> c3,
                  array_type<double> c4, array_type<double> c5,
-                 int length, int ninterps)
+                 int length, int ninterps, int chunk)
 {
     interpolate_quintic(
         CubicSplineWrap::return_pointer_and_check_length(x, "x", length, ninterps),
@@ -72,7 +72,8 @@ void interpolate_quintic_wrap(array_type<double> x, array_type<double> y,
         CubicSplineWrap::return_pointer_and_check_length(c4, "c4", length, ninterps),
         CubicSplineWrap::return_pointer_and_check_length(c5, "c5", length, ninterps),
         length,
-        ninterps
+        ninterps,
+        chunk
     );
 }
 
@@ -202,7 +203,11 @@ NB_MODULE(interp, m) {
     m.def("check_spline", &check_spline, "Make sure that we can insert spline properly.");
     m.def("get_module_path_cpp", &get_module_path_gbt, "Returns the file path of the module");
     m.def("interpolate_wrap", &interpolate_wrap, "Interpolate arrays.");
-    m.def("interpolate_quintic_wrap", &interpolate_quintic_wrap, "Quintic (k=5) interpolation: fill c1..c5 from (x, y).");
+    m.def("interpolate_quintic_wrap", &interpolate_quintic_wrap,
+          nb::arg("x"), nb::arg("y"), nb::arg("c1"), nb::arg("c2"), nb::arg("c3"),
+          nb::arg("c4"), nb::arg("c5"), nb::arg("length"), nb::arg("ninterps"),
+          nb::arg("chunk") = 0,
+          "Quintic (k=5) interpolation: fill c1..c5 from (x, y). chunk=0 -> auto.");
 #if !defined(__CUDA_COMPILATION__) && !defined(__CUDACC__)
     m.def("fit_cubic_spline_thomas", &fit_cubic_spline_thomas_wrap,
           "(CPU-only) Fit a single cubic spline via the Thomas algorithm (in place; fills c1, c2, c3).");

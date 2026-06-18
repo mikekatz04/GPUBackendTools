@@ -25,7 +25,7 @@ void eval_wrap(CubicSpline *spline, double *y_new, double *x_new, int *spline_in
 // is allocated internally (see Interpolate.cu); callers provide only c1..c5.
 void interpolate_quintic(double* x, double* y,
                          double* c1, double* c2, double* c3, double* c4, double* c5,
-                         int length, int ninterps);
+                         int length, int ninterps, int chunk);
 
 void eval_quintic_wrap(QuinticSpline *spline, double *y_new, double *x_new, int *spline_index, int N);
 

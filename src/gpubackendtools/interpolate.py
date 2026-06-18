@@ -456,9 +456,14 @@ class QuinticSplineInterpolant(GBTParallelModuleBase):
         length=None,
         spline_type=None,
         force_backend=None,
+        _chunk=0,
     ):
 
         super().__init__(force_backend=force_backend)
+
+        # Solve chunk size (rows per SPIKE partition). 0 = auto (native chooses).
+        # Exposed for tests to force the multi-chunk / reduced-system paths.
+        self._chunk = int(_chunk)
 
         # first check is for flattened arrays
         if x.ndim == 1 or y_all.ndim == 1:
@@ -544,6 +549,7 @@ class QuinticSplineInterpolant(GBTParallelModuleBase):
                 self.c5_flat[sl],
                 self.length,
                 s1 - s0,
+                self._chunk,
             )
 
     @property

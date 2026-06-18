@@ -809,6 +809,68 @@ void extract_quintic_coeffs(int i, int length, int interp_i, int ninterps,
     c5[idx] = s5 / 120.0;
 }
 
+// ===========================================================================
+// SPIKE / chunked parallel banded-solve primitives (see
+// docs/superpowers/specs/2026-06-18-quintic-gpu-spike-solve-design.md).
+// These operate on a CONTIGUOUS local band buffer ws[band_row*n + col] with a
+// runtime half-bandwidth m, so the same code serves the chunk solve (m=4) and
+// the reduced system (m=8). Deliberately independent of the global QBAND/QRHS
+// layout: a chunk is gathered into a contiguous buffer first (band_gather).
+// ===========================================================================
+
+// Pivot-free banded LU on a contiguous buffer, half-band m, order n. In place.
+// Returns 0 on success, (row+1) on a zero pivot.
+CUDA_DEVICE
+int banfac_local(double *ws, int m, int n)
+{
+    for (int i = 0; i < n; ++i)
+    {
+        double piv = ws[m * n + i];
+        if (piv == 0.0) return i + 1;
+        int imax = (m < (n - 1 - i)) ? m : (n - 1 - i);
+        for (int s = 1; s <= imax; ++s)
+        {
+            double fac = ws[(m + s) * n + i] / piv;
+            ws[(m + s) * n + i] = fac;
+            for (int r = 1; r <= imax; ++r)
+                ws[(m + s - r) * n + (i + r)] -= fac * ws[(m - r) * n + (i + r)];
+        }
+    }
+    return 0;
+}
+
+// Solve after banfac_local; rhs b (length n) overwritten with the solution.
+CUDA_DEVICE
+void banslv_local(double *ws, int m, int n, double *b)
+{
+    for (int i = 0; i < n; ++i)                 // forward (unit lower L)
+    {
+        int imax = (m < (n - 1 - i)) ? m : (n - 1 - i);
+        for (int s = 1; s <= imax; ++s)
+            b[i + s] -= ws[(m + s) * n + i] * b[i];
+    }
+    for (int i = n - 1; i >= 0; --i)            // back (upper U)
+    {
+        b[i] /= ws[m * n + i];
+        int imax = (m < i) ? m : i;
+        for (int s = 1; s <= imax; ++s)
+            b[i - s] -= ws[(m - s) * n + i] * b[i];
+    }
+}
+
+// Gather band rows of columns [r0, r0+rows) of spline interp_i from the global
+// (QBAND-layout) band W into a contiguous buffer dst[band_row*rows + (col-r0)].
+// Copies all QUINTIC_BAND_ROWS rows; entries referencing columns outside the
+// chunk are the inter-chunk coupling, handled by quintic_spike_solve (Task 2).
+CUDA_DEVICE
+void band_gather(double *dst, double *W, int interp_i, int ninterps,
+                 int length, int r0, int rows)
+{
+    for (int br = 0; br < QUINTIC_BAND_ROWS; ++br)
+        for (int c = 0; c < rows; ++c)
+            dst[br * rows + c] = QBAND(W, br, r0 + c, interp_i, ninterps, length);
+}
+
 // --- Kernels (block per spline over rows; mirror fill_B / set_spline_constants) ---
 CUDA_KERNEL
 void fill_quintic_band(double *x, double *y, double *W, double *B,
@@ -892,8 +954,9 @@ void set_quintic_constants(double *x, double *coef,
 // B-spline coefficient scratch B; fills c1..c5 in place.
 void interpolate_quintic(double *x, double *y,
                          double *c1, double *c2, double *c3, double *c4, double *c5,
-                         int length, int ninterps)
+                         int length, int ninterps, int chunk)
 {
+    (void)chunk;  // Task 1: accepted + plumbed; consumed by quintic_spike_solve (Task 2).
     size_t band_count = (size_t)ninterps * QUINTIC_BAND_ROWS * (size_t)length;
     size_t rhs_count = (size_t)ninterps * (size_t)length;
 

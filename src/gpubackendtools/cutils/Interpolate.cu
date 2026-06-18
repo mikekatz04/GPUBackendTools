@@ -571,17 +571,23 @@ CubicSpline fit_cubic_spline_pcr(double *x, double *y,
 #define QUINTIC_HALF_BAND 4              // true nonzero half-bandwidth (kl=ku)
 #define QUINTIC_BAND_ROWS 9              // 2*QUINTIC_HALF_BAND + 1
 
-// interp_i-innermost (coalesced) layout for the internal solve scratch. The
-// band W and rhs/coef B are per-call scratch private to interpolate_quintic;
-// laying interp_i innermost makes the memory-bound one-thread-per-spline solve
-// coalesce (neighbouring threads -> neighbouring addresses) for any length, no
-// shared memory, no algorithm change. The OUTPUT c1..c5 keep interp_i*length+i.
+// Per-spline-contiguous layout for the internal solve scratch -- mirrors the
+// cubic (interp_i*length + i; see prep_splines / fill_coefficients): each
+// spline's band/rhs is ONE contiguous run, so fill_quintic_band /
+// set_quintic_constants coalesce (one block per spline, threads over col) for
+// ANY ninterps, exactly like fill_B / set_spline_constants. It is also EXACTLY
+// the contiguous per-system band the SPIKE solver expects
+// (cb[sys*QUINTIC_BAND_ROWS*length + b*length + c]) and rhs (rb[sys*length + c]),
+// so the solve reads W/B directly -- no gather. The OUTPUT c1..c5 keep their
+// interp_i*length+i layout (unchanged). (The legacy one-thread-per-spline solve
+// is uncoalesced under this layout, but it is an off-by-default fallback; SPIKE
+// is the default path. The ninterps arg to QBAND is now vestigial/ignored.)
 //   band element (band_row b in [0,8], col c in [0,length)) of spline interp_i
 //   rhs/coef element (col c) of spline interp_i
 #define QBAND(W, b, c, interp_i, ninterps, length) \
-    (W)[(((size_t)(b) * (length) + (c)) * (ninterps)) + (interp_i)]
-#define QRHS(B, c, interp_i, ninterps) \
-    (B)[((size_t)(c) * (ninterps)) + (interp_i)]
+    (W)[(((size_t)(interp_i) * QUINTIC_BAND_ROWS + (b)) * (length)) + (c)]
+#define QRHS(B, c, interp_i, length) \
+    (B)[((size_t)(interp_i) * (length)) + (c)]
 
 // Closed-form not-a-knot knot vector entry t[k], k in [0, n+5], for the grid x
 // of length n. t = [x0]*6 ++ x[3:n-3] ++ [x_{n-1}]*6. No materialization needed.
@@ -704,7 +710,7 @@ void quintic_ders_basis_funs(double *x, int n, int l, double xv, double ders[QUI
 }
 
 // Build collocation row i (point x_i) into spline interp_i's banded scratch +
-// rhs. Band/rhs use the interp_i-innermost layout (QBAND/QRHS): A[i,j] stored at
+// rhs. Band/rhs use the per-spline-contiguous layout (QBAND/QRHS): A[i,j] stored at
 // QBAND(W, QUINTIC_HALF_BAND + i - j, j, interp_i, ninterps, length). W must be
 // pre-zeroed. (Inputs x, y keep their interp_i*length+i layout.)
 CUDA_DEVICE
@@ -725,11 +731,11 @@ void prep_quintic_band(int i, int length, int interp_i, int ninterps,
         if (off >= -QUINTIC_HALF_BAND && off <= QUINTIC_HALF_BAND)
             QBAND(W, QUINTIC_HALF_BAND + off, j, interp_i, ninterps, length) = N[jj];
     }
-    QRHS(B, i, interp_i, ninterps) = y[interp_i * length + i];
+    QRHS(B, i, interp_i, length) = y[interp_i * length + i];
 }
 
 // Pivot-free banded LU (de Boor banfac), half-bandwidth 4, in place on spline
-// interp_i's band (interp_i-innermost layout, n = length). Returns 0 on success,
+// interp_i's band (per-spline-contiguous layout, n = length). Returns 0 on success,
 // (row+1) on a zero pivot (never for a valid strictly-increasing grid: the
 // collocation matrix is totally positive).
 CUDA_DEVICE
@@ -753,7 +759,7 @@ int quintic_banfac(double *W, int interp_i, int ninterps, int n)
     return 0;
 }
 
-// Solve after quintic_banfac; B (interp_i-innermost rhs, n = length) overwritten
+// Solve after quintic_banfac; B (per-spline-contiguous rhs, n = length) overwritten
 // with the B-spline coefficients for spline interp_i.
 CUDA_DEVICE
 void quintic_banslv(double *W, double *B, int interp_i, int ninterps, int n)
@@ -763,16 +769,16 @@ void quintic_banslv(double *W, double *B, int interp_i, int ninterps, int n)
     {
         int imax = (m < (n - 1 - i)) ? m : (n - 1 - i);
         for (int s = 1; s <= imax; ++s)
-            QRHS(B, i + s, interp_i, ninterps) -=
-                QBAND(W, m + s, i, interp_i, ninterps, n) * QRHS(B, i, interp_i, ninterps);
+            QRHS(B, i + s, interp_i, n) -=
+                QBAND(W, m + s, i, interp_i, ninterps, n) * QRHS(B, i, interp_i, n);
     }
     for (int i = n - 1; i >= 0; --i)            // back (upper U)
     {
-        QRHS(B, i, interp_i, ninterps) /= QBAND(W, m, i, interp_i, ninterps, n);
+        QRHS(B, i, interp_i, n) /= QBAND(W, m, i, interp_i, ninterps, n);
         int imax = (m < i) ? m : i;
         for (int s = 1; s <= imax; ++s)
-            QRHS(B, i - s, interp_i, ninterps) -=
-                QBAND(W, m - s, i, interp_i, ninterps, n) * QRHS(B, i, interp_i, ninterps);
+            QRHS(B, i - s, interp_i, n) -=
+                QBAND(W, m - s, i, interp_i, ninterps, n) * QRHS(B, i, interp_i, n);
     }
 }
 
@@ -792,9 +798,9 @@ void extract_quintic_coeffs(int i, int length, int interp_i, int ninterps,
     double s1 = 0.0, s2 = 0.0, s3 = 0.0, s4 = 0.0, s5 = 0.0;
     for (int jj = 0; jj <= QUINTIC_DEG; ++jj)
     {
-        // coef (= solved B, interp_i-innermost). Outputs c1..c5 below keep their
+        // coef (= solved B, per-spline-contiguous). Outputs c1..c5 below keep their
         // interp_i*length+i layout.
-        double cc = QRHS(coef, l - QUINTIC_DEG + jj, interp_i, ninterps);
+        double cc = QRHS(coef, l - QUINTIC_DEG + jj, interp_i, length);
         s1 += cc * ders[1][jj];
         s2 += cc * ders[2][jj];
         s3 += cc * ders[3][jj];
@@ -814,8 +820,9 @@ void extract_quintic_coeffs(int i, int length, int interp_i, int ninterps,
 // docs/superpowers/specs/2026-06-18-quintic-gpu-spike-solve-design.md).
 // These operate on a CONTIGUOUS local band buffer ws[band_row*n + col] with a
 // runtime half-bandwidth m, so the same code serves the chunk solve (m=4) and
-// the reduced system (m=8). Deliberately independent of the global QBAND/QRHS
-// layout: a chunk is gathered into a contiguous buffer first (band_gather).
+// the reduced system (m=8). With W/B in per-spline-contiguous (cubic-style)
+// layout, each spline's slice of W/B IS such a contiguous band/rhs, so the
+// solve operates on it in place -- no gather/scatter needed.
 // ===========================================================================
 
 // Pivot-free banded LU on a contiguous buffer, half-band m, order n. In place.
@@ -856,19 +863,6 @@ void banslv_local(double *ws, int m, int n, double *b)
         for (int s = 1; s <= imax; ++s)
             b[i - s] -= ws[(m - s) * n + i] * b[i];
     }
-}
-
-// Gather band rows of columns [r0, r0+rows) of spline interp_i from the global
-// (QBAND-layout) band W into a contiguous buffer dst[band_row*rows + (col-r0)].
-// Copies all QUINTIC_BAND_ROWS rows; entries referencing columns outside the
-// chunk are the inter-chunk coupling, handled by quintic_spike_solve (Task 2).
-CUDA_DEVICE
-void band_gather(double *dst, double *W, int interp_i, int ninterps,
-                 int length, int r0, int rows)
-{
-    for (int br = 0; br < QUINTIC_BAND_ROWS; ++br)
-        for (int c = 0; c < rows; ++c)
-            dst[br * rows + c] = QBAND(W, br, r0 + c, interp_i, ninterps, length);
 }
 
 // Add v to reduced-system band entry A_red[i,k] (contiguous, half-band Mred).
@@ -1108,30 +1102,17 @@ void quintic_spike_batched(double *cb, double *rb, int nsys, int n, int m, int C
     delete[] g; delete[] V; delete[] W; delete[] wr; delete[] rr; delete[] sD;
 }
 
-// Solve all splines: gather each spline's band (QBAND W) + rhs (QRHS B) into a
-// contiguous batched buffer, run the SPIKE mirror, scatter the solution back into
-// B. chunk<=0 keeps the legacy CPU behaviour (single direct banded solve per
-// spline); a positive chunk forces the chunked/recursive path (exercised by the
-// tests). The GPU path defaults chunk to QSPIKE_DEFAULT_C to saturate the device.
+// Solve all splines. With W/B in per-spline-contiguous layout, W IS the batched
+// contiguous band (cb[sys*QUINTIC_BAND_ROWS*length + b*length + c]) and B IS the
+// batched rhs (rb[sys*length + c]) the SPIKE mirror expects, so it runs IN PLACE
+// -- no gather/scatter, no extra buffers. chunk<=0 keeps the legacy single direct
+// banded solve per spline (P==1); a positive chunk forces the chunked/recursive
+// path (exercised by the tests). The GPU entry defaults chunk to QSPIKE_DEFAULT_C.
 void quintic_spike_solve(double *W, double *B, int ninterps, int length, int chunk, int uniform)
 {
     (void)uniform;   // uniform Toeplitz caching is a follow-up; not on the mirrored path
-    int m = QUINTIC_HALF_BAND;
-    int bandrows = QUINTIC_BAND_ROWS;
     int Creq = (chunk > 0) ? chunk : length;            // CPU default: one chunk (P==1)
-
-    double *cb = new double[(size_t)ninterps * bandrows * length];
-    double *rb = new double[(size_t)ninterps * length];
-    for (int s = 0; s < ninterps; ++s)
-    {
-        band_gather(&cb[(size_t)s * bandrows * length], W, s, ninterps, length, 0, length);
-        double *rbs = &rb[(size_t)s * length];
-        for (int c = 0; c < length; ++c) rbs[c] = QRHS(B, c, s, ninterps);
-    }
-    quintic_spike_batched(cb, rb, ninterps, length, m, Creq);
-    for (int s = 0; s < ninterps; ++s)
-        for (int c = 0; c < length; ++c) QRHS(B, c, s, ninterps) = rb[(size_t)s * length + c];
-    delete[] cb; delete[] rb;
+    quintic_spike_batched(W, B, ninterps, length, QUINTIC_HALF_BAND, Creq);
 }
 #endif // !__CUDACC__
 
@@ -1177,8 +1158,10 @@ void solve_quintic_band_batch(double *W, double *B, int ninterps, int length)
 #endif
     for (int interp_i = start; interp_i < ninterps; interp_i += diff)
     {
-        // interp_i-innermost layout -> consecutive threads (interp_i, interp_i+1,
-        // ...) read consecutive addresses: the memory-bound solve coalesces.
+        // NOTE: under the per-spline-contiguous layout this legacy one-thread-
+        // per-spline solve is UNCOALESCED (thread interp_i strides 9*length). It
+        // is an off-by-default fallback (GBT_QUINTIC_LEGACY_SOLVE); SPIKE is the
+        // default coalesced/parallel path. See the QBAND/QRHS layout note above.
         int info = quintic_banfac(W, interp_i, ninterps, length);
         if (info == 0) quintic_banslv(W, B, interp_i, ninterps, length);
     }
@@ -1400,65 +1383,15 @@ void qspike_solve_gpu_batched(double *cb, double *rb, int nsys, int n, int m, in
     gpuErrchk(cudaFree(wr)); gpuErrchk(cudaFree(rr));
 }
 
-// Gather each spline's QBAND band + QRHS rhs into the contiguous batched buffers
-// cb0/rb0 (the layout qspike_solve_gpu_batched expects). grid = dim3(systems-on-x,
-// columns-on-threads); one block per system, threads stride over columns so the
-// QBAND reads coalesce across threads. Each thread copies all QUINTIC_BAND_ROWS
-// rows of its column plus the rhs.
-CUDA_KERNEL
-void qspike_gather_kernel(const double *W, const double *B, double *cb0, double *rb0,
-                          int ninterps, int length)
-{
-    int bandrows = QUINTIC_BAND_ROWS;
-    for (int sys = BLOCK_START_X; sys < ninterps; sys += GRID_INCR_X)
-    {
-        double *cbs = &cb0[(size_t)sys * bandrows * length];
-        double *rbs = &rb0[(size_t)sys * length];
-        for (int c = THREAD_START_X; c < length; c += BLOCK_INCR_X)
-        {
-            for (int br = 0; br < bandrows; ++br)
-                cbs[(size_t)br * length + c] = QBAND(W, br, c, sys, ninterps, length);
-            rbs[c] = QRHS(B, c, sys, ninterps);
-        }
-    }
-}
-
-// Scatter the solved rhs rb0 back into the global QRHS layout B.
-CUDA_KERNEL
-void qspike_scatter_kernel(double *B, const double *rb0, int ninterps, int length)
-{
-    for (int sys = BLOCK_START_X; sys < ninterps; sys += GRID_INCR_X)
-    {
-        const double *rbs = &rb0[(size_t)sys * length];
-        for (int c = THREAD_START_X; c < length; c += BLOCK_INCR_X)
-            QRHS(B, c, sys, ninterps) = rbs[c];
-    }
-}
-
-// Host entry called by interpolate_quintic. Gathers QBAND/QRHS -> contiguous
-// batched cb0/rb0, runs the recursive batched SPIKE solver, scatters back.
+// Host entry called by interpolate_quintic. With W/B in per-spline-contiguous
+// layout, W IS the batched contiguous band (W[sys*QUINTIC_BAND_ROWS*length +
+// b*length + c]) and B IS the batched rhs (B[sys*length + c]) the recursive SPIKE
+// solver expects, so it runs IN PLACE -- no gather/scatter, no cb0/rb0 staging.
 void quintic_spike_solve_gpu(double *W, double *B, int ninterps, int length, int chunk, int uniform)
 {
     (void)uniform;                                  // Toeplitz cache is a GPU follow-up
-    int m = QUINTIC_HALF_BAND;
-    int bandrows = QUINTIC_BAND_ROWS;
     int Creq = (chunk > 0) ? chunk : QSPIKE_DEFAULT_C;   // GPU default: 1024 (saturate the device)
-    int T = NUM_THREADS_INTERPOLATE;
-
-    double *cb0, *rb0;
-    gpuErrchk(cudaMalloc(&cb0, (size_t)ninterps * bandrows * length * sizeof(double)));
-    gpuErrchk(cudaMalloc(&rb0, (size_t)ninterps * length * sizeof(double)));
-
-    int gblocks = (ninterps < 65535) ? ninterps : 65535;
-    qspike_gather_kernel<<<gblocks, T>>>(W, B, cb0, rb0, ninterps, length);
-    cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
-
-    qspike_solve_gpu_batched(cb0, rb0, ninterps, length, m, Creq);
-
-    qspike_scatter_kernel<<<gblocks, T>>>(B, rb0, ninterps, length);
-    cudaDeviceSynchronize(); gpuErrchk(cudaGetLastError());
-
-    gpuErrchk(cudaFree(cb0)); gpuErrchk(cudaFree(rb0));
+    qspike_solve_gpu_batched(W, B, ninterps, length, QUINTIC_HALF_BAND, Creq);
 }
 #endif // __CUDACC__
 

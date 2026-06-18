@@ -41,6 +41,25 @@ class SpikeSolveTest(unittest.TestCase):
     def test_single_chunk_uniform(self):
         self._check(n=40, ninterps=1, kind="uniform", chunk=0)
 
+    # Task 2: tiny chunk forces the multi-chunk + reduced-system path.
+    def test_multichunk_uniform(self):
+        for n in (20, 37, 64, 200):
+            self._check(n=n, ninterps=1, kind="uniform", chunk=8)
+
+    def test_multichunk_nonuniform(self):
+        for n in (25, 50, 123):
+            self._check(n=n, ninterps=1, kind="random", chunk=8)
+
+    def test_multichunk_log(self):
+        self._check(n=80, ninterps=1, kind="log", chunk=8)
+
+    def test_multichunk_batch(self):
+        self._check(n=60, ninterps=5, kind="uniform", chunk=8)
+        self._check(n=60, ninterps=5, kind="random", chunk=8)
+
+    def test_chunk_equals_or_exceeds_n(self):  # degenerate single chunk
+        self._check(n=12, ninterps=2, kind="random", chunk=64)
+
 
 if __name__ == "__main__":
     unittest.main()

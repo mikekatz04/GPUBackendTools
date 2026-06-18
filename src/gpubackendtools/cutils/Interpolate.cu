@@ -871,6 +871,161 @@ void band_gather(double *dst, double *W, int interp_i, int ninterps,
             dst[br * rows + c] = QBAND(W, br, r0 + c, interp_i, ninterps, length);
 }
 
+// Add v to reduced-system band entry A_red[i,k] (contiguous, half-band Mred).
+static inline void red_add(double *wr, int Mred, int R, int i, int k, double v)
+{
+    wr[(size_t)(Mred + (i - k)) * R + k] += v;
+}
+
+// Solve ONE banded system: contiguous band cb[br*n + col] (half-band m), rhs rb
+// (length n) overwritten with the solution. SPIKE partition into chunks of C
+// rows (>= 2m); reduced system assembled in interleaved physical order and
+// solved directly with the same banded primitives (Task 3 adds recursion).
+// Mirrors the validated NumPy reference (matches np.linalg.solve to ~1e-16).
+void spike_solve_one(double *cb, double *rb, int n, int m, int C)
+{
+    if (C < 2 * m) C = 2 * m;
+    int P = n / C;
+    if (P < 1) P = 1;
+    if (P == 1)                                   // single chunk: direct banded solve
+    {
+        banfac_local(cb, m, n);
+        banslv_local(cb, m, n, rb);
+        return;
+    }
+
+    double *g = new double[n];                    // g_j = D_j^{-1} f_j
+    double *Vs = new double[(size_t)n * m];       // right spikes, row-major [row*m + b]
+    double *Ws = new double[(size_t)n * m];       // left spikes
+
+    for (int j = 0; j < P; ++j)
+    {
+        int s = j * C;
+        int e = (j < P - 1) ? (s + C) : n;
+        int nj = e - s;
+
+        double *D = new double[(size_t)(2 * m + 1) * nj];   // chunk diagonal block (coupling rows zeroed)
+        for (int br = 0; br <= 2 * m; ++br)
+            for (int c = 0; c < nj; ++c)
+            {
+                int row = (s + c) + (br - m);
+                D[br * nj + c] = (row >= s && row < e) ? cb[br * n + (s + c)] : 0.0;
+            }
+        banfac_local(D, m, nj);
+
+        for (int c = 0; c < nj; ++c) g[s + c] = rb[s + c];
+        banslv_local(D, m, nj, &g[s]);
+
+        if (j < P - 1)                            // right spike: rhs bottom m rows = Sup_j (nonzero a>=b)
+            for (int b = 0; b < m; ++b)
+            {
+                double *col = new double[nj];
+                for (int c = 0; c < nj; ++c) col[c] = 0.0;
+                for (int a = b; a < m; ++a) col[nj - m + a] = cb[(a - b) * n + (e + b)];
+                banslv_local(D, m, nj, col);
+                for (int c = 0; c < nj; ++c) Vs[(size_t)(s + c) * m + b] = col[c];
+                delete[] col;
+            }
+        if (j > 0)                                // left spike: rhs top m rows = Sub_j (nonzero a<=b)
+            for (int b = 0; b < m; ++b)
+            {
+                double *col = new double[nj];
+                for (int c = 0; c < nj; ++c) col[c] = 0.0;
+                for (int a = 0; a <= b; ++a) col[a] = cb[(2 * m + a - b) * n + (s - m + b)];
+                banslv_local(D, m, nj, col);
+                for (int c = 0; c < nj; ++c) Ws[(size_t)(s + c) * m + b] = col[c];
+                delete[] col;
+            }
+        delete[] D;
+    }
+
+    // Interleaved reduced unknowns: ("b",0),("t",1),("b",1),...,("t",P-1).
+    int *pos_t = new int[P];
+    int *pos_b = new int[P];
+    for (int j = 0; j < P; ++j) { pos_t[j] = -1; pos_b[j] = -1; }
+    int blk = 0;
+    for (int j = 0; j < P; ++j)
+    {
+        if (j > 0) { pos_t[j] = blk * m; ++blk; }
+        if (j < P - 1) { pos_b[j] = blk * m; ++blk; }
+    }
+    int R = blk * m;
+    int Mred = 3 * m;
+    double *wr = new double[(size_t)(2 * Mred + 1) * R];
+    for (size_t t = 0; t < (size_t)(2 * Mred + 1) * R; ++t) wr[t] = 0.0;
+    double *rr = new double[R];
+
+    for (int j = 0; j < P; ++j)
+    {
+        int s = j * C;
+        int e = (j < P - 1) ? (s + C) : n;
+        int nj = e - s;
+        if (pos_t[j] >= 0)                        // top equation: x_j^t + V_j^t x_{j+1}^t + W_j^t x_{j-1}^b = g_j^t
+        {
+            int p = pos_t[j];
+            for (int a = 0; a < m; ++a) { red_add(wr, Mred, R, p + a, p + a, 1.0); rr[p + a] = g[s + a]; }
+            if (j < P - 1 && pos_t[j + 1] >= 0)
+                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                    red_add(wr, Mred, R, p + a, pos_t[j + 1] + b, Vs[(size_t)(s + a) * m + b]);
+            if (j > 0 && pos_b[j - 1] >= 0)
+                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                    red_add(wr, Mred, R, p + a, pos_b[j - 1] + b, Ws[(size_t)(s + a) * m + b]);
+        }
+        if (pos_b[j] >= 0)                        // bottom equation: x_j^b + V_j^b x_{j+1}^t + W_j^b x_{j-1}^b = g_j^b
+        {
+            int p = pos_b[j];
+            for (int a = 0; a < m; ++a) { red_add(wr, Mred, R, p + a, p + a, 1.0); rr[p + a] = g[s + nj - m + a]; }
+            if (j < P - 1 && pos_t[j + 1] >= 0)
+                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                    red_add(wr, Mred, R, p + a, pos_t[j + 1] + b, Vs[(size_t)(s + nj - m + a) * m + b]);
+            if (j > 0 && pos_b[j - 1] >= 0)
+                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                    red_add(wr, Mred, R, p + a, pos_b[j - 1] + b, Ws[(size_t)(s + nj - m + a) * m + b]);
+        }
+    }
+
+    banfac_local(wr, Mred, R);
+    banslv_local(wr, Mred, R, rr);                // rr now holds the interface tips
+
+    for (int j = 0; j < P; ++j)                   // x_j = g_j - V_j x_{j+1}^t - W_j x_{j-1}^b
+    {
+        int s = j * C;
+        int e = (j < P - 1) ? (s + C) : n;
+        int nj = e - s;
+        for (int c = 0; c < nj; ++c)
+        {
+            double x = g[s + c];
+            if (j < P - 1 && pos_t[j + 1] >= 0)
+                for (int b = 0; b < m; ++b) x -= Vs[(size_t)(s + c) * m + b] * rr[pos_t[j + 1] + b];
+            if (j > 0 && pos_b[j - 1] >= 0)
+                for (int b = 0; b < m; ++b) x -= Ws[(size_t)(s + c) * m + b] * rr[pos_b[j - 1] + b];
+            rb[s + c] = x;
+        }
+    }
+
+    delete[] g; delete[] Vs; delete[] Ws;
+    delete[] pos_t; delete[] pos_b; delete[] wr; delete[] rr;
+}
+
+// Solve all splines: gather each spline's band (QBAND W) + rhs (QRHS B) into
+// contiguous buffers, SPIKE-solve, write the solution back into B. chunk<=0 =>
+// single chunk (CPU auto; the GPU shared-memory budget is set in Task 5).
+void quintic_spike_solve(double *W, double *B, int ninterps, int length, int chunk)
+{
+    int m = QUINTIC_HALF_BAND;
+    int C = (chunk > 0) ? chunk : length;
+    for (int s = 0; s < ninterps; ++s)
+    {
+        double *cb = new double[(size_t)QUINTIC_BAND_ROWS * length];
+        band_gather(cb, W, s, ninterps, length, 0, length);
+        double *rb = new double[length];
+        for (int c = 0; c < length; ++c) rb[c] = QRHS(B, c, s, ninterps);
+        spike_solve_one(cb, rb, length, m, C);
+        for (int c = 0; c < length; ++c) QRHS(B, c, s, ninterps) = rb[c];
+        delete[] cb; delete[] rb;
+    }
+}
+
 // --- Kernels (block per spline over rows; mirror fill_B / set_spline_constants) ---
 CUDA_KERNEL
 void fill_quintic_band(double *x, double *y, double *W, double *B,
@@ -988,7 +1143,7 @@ void interpolate_quintic(double *x, double *y,
     double *B = new double[rhs_count];
 
     fill_quintic_band(x, y, W, B, ninterps, length);
-    solve_quintic_band_batch(W, B, ninterps, length);
+    quintic_spike_solve(W, B, ninterps, length, chunk);   // SPIKE chunked solve (Task 2)
     set_quintic_constants(x, B, c1, c2, c3, c4, c5, ninterps, length);
 
     delete[] W;

@@ -571,6 +571,18 @@ CubicSpline fit_cubic_spline_pcr(double *x, double *y,
 #define QUINTIC_HALF_BAND 4              // true nonzero half-bandwidth (kl=ku)
 #define QUINTIC_BAND_ROWS 9              // 2*QUINTIC_HALF_BAND + 1
 
+// interp_i-innermost (coalesced) layout for the internal solve scratch. The
+// band W and rhs/coef B are per-call scratch private to interpolate_quintic;
+// laying interp_i innermost makes the memory-bound one-thread-per-spline solve
+// coalesce (neighbouring threads -> neighbouring addresses) for any length, no
+// shared memory, no algorithm change. The OUTPUT c1..c5 keep interp_i*length+i.
+//   band element (band_row b in [0,8], col c in [0,length)) of spline interp_i
+//   rhs/coef element (col c) of spline interp_i
+#define QBAND(W, b, c, interp_i, ninterps, length) \
+    (W)[(((size_t)(b) * (length) + (c)) * (ninterps)) + (interp_i)]
+#define QRHS(B, c, interp_i, ninterps) \
+    (B)[((size_t)(c) * (ninterps)) + (interp_i)]
+
 // Closed-form not-a-knot knot vector entry t[k], k in [0, n+5], for the grid x
 // of length n. t = [x0]*6 ++ x[3:n-3] ++ [x_{n-1}]*6. No materialization needed.
 CUDA_DEVICE
@@ -691,15 +703,15 @@ void quintic_ders_basis_funs(double *x, int n, int l, double xv, double ders[QUI
     }
 }
 
-// Build collocation row i (point x_i) into spline interp_i's banded slab + rhs.
-// Band slab w of spline s lives at W + s*QUINTIC_BAND_ROWS*length and stores
-// A[i,j] at w[(QUINTIC_HALF_BAND + i - j)*length + j]. W must be pre-zeroed.
+// Build collocation row i (point x_i) into spline interp_i's banded scratch +
+// rhs. Band/rhs use the interp_i-innermost layout (QBAND/QRHS): A[i,j] stored at
+// QBAND(W, QUINTIC_HALF_BAND + i - j, j, interp_i, ninterps, length). W must be
+// pre-zeroed. (Inputs x, y keep their interp_i*length+i layout.)
 CUDA_DEVICE
 void prep_quintic_band(int i, int length, int interp_i, int ninterps,
                        double *W, double *B, double *x, double *y)
 {
     double *xs = &x[interp_i * length];
-    double *ws = &W[(size_t)interp_i * QUINTIC_BAND_ROWS * length];
 
     int l = quintic_find_span(xs, length, xs[i]);
     double N[QUINTIC_DEG + 1];
@@ -711,51 +723,56 @@ void prep_quintic_band(int i, int length, int interp_i, int ninterps,
         // Structural zeros (de Boor offset 5 at the right end) fall outside the
         // 4-band; skip them -- W is already zeroed.
         if (off >= -QUINTIC_HALF_BAND && off <= QUINTIC_HALF_BAND)
-            ws[(QUINTIC_HALF_BAND + off) * length + j] = N[jj];
+            QBAND(W, QUINTIC_HALF_BAND + off, j, interp_i, ninterps, length) = N[jj];
     }
-    B[interp_i * length + i] = y[interp_i * length + i];
+    QRHS(B, i, interp_i, ninterps) = y[interp_i * length + i];
 }
 
-// Pivot-free banded LU (de Boor banfac), half-bandwidth 4, in place on one
-// slab. Returns 0 on success, (row+1) on a zero pivot (never for a valid
-// strictly-increasing grid: the collocation matrix is totally positive).
+// Pivot-free banded LU (de Boor banfac), half-bandwidth 4, in place on spline
+// interp_i's band (interp_i-innermost layout, n = length). Returns 0 on success,
+// (row+1) on a zero pivot (never for a valid strictly-increasing grid: the
+// collocation matrix is totally positive).
 CUDA_DEVICE
-int quintic_banfac(double *ws, int n)
+int quintic_banfac(double *W, int interp_i, int ninterps, int n)
 {
     const int m = QUINTIC_HALF_BAND;
     for (int i = 0; i < n; ++i)
     {
-        double piv = ws[m * n + i];
+        double piv = QBAND(W, m, i, interp_i, ninterps, n);
         if (piv == 0.0) return i + 1;
         int imax = (m < (n - 1 - i)) ? m : (n - 1 - i);
         for (int s = 1; s <= imax; ++s)
         {
-            double fac = ws[(m + s) * n + i] / piv;
-            ws[(m + s) * n + i] = fac;
+            double fac = QBAND(W, m + s, i, interp_i, ninterps, n) / piv;
+            QBAND(W, m + s, i, interp_i, ninterps, n) = fac;
             for (int r = 1; r <= imax; ++r)
-                ws[(m + s - r) * n + (i + r)] -= fac * ws[(m - r) * n + (i + r)];
+                QBAND(W, m + s - r, i + r, interp_i, ninterps, n) -=
+                    fac * QBAND(W, m - r, i + r, interp_i, ninterps, n);
         }
     }
     return 0;
 }
 
-// Solve after quintic_banfac; b overwritten with the B-spline coefficients.
+// Solve after quintic_banfac; B (interp_i-innermost rhs, n = length) overwritten
+// with the B-spline coefficients for spline interp_i.
 CUDA_DEVICE
-void quintic_banslv(double *ws, int n, double *b)
+void quintic_banslv(double *W, double *B, int interp_i, int ninterps, int n)
 {
     const int m = QUINTIC_HALF_BAND;
     for (int i = 0; i < n; ++i)                 // forward (unit lower L)
     {
         int imax = (m < (n - 1 - i)) ? m : (n - 1 - i);
         for (int s = 1; s <= imax; ++s)
-            b[i + s] -= ws[(m + s) * n + i] * b[i];
+            QRHS(B, i + s, interp_i, ninterps) -=
+                QBAND(W, m + s, i, interp_i, ninterps, n) * QRHS(B, i, interp_i, ninterps);
     }
     for (int i = n - 1; i >= 0; --i)            // back (upper U)
     {
-        b[i] /= ws[m * n + i];
+        QRHS(B, i, interp_i, ninterps) /= QBAND(W, m, i, interp_i, ninterps, n);
         int imax = (m < i) ? m : i;
         for (int s = 1; s <= imax; ++s)
-            b[i - s] -= ws[(m - s) * n + i] * b[i];
+            QRHS(B, i - s, interp_i, ninterps) -=
+                QBAND(W, m - s, i, interp_i, ninterps, n) * QRHS(B, i, interp_i, ninterps);
     }
 }
 
@@ -767,7 +784,6 @@ void extract_quintic_coeffs(int i, int length, int interp_i, int ninterps,
                             double *c1, double *c2, double *c3, double *c4, double *c5)
 {
     double *xs = &x[interp_i * length];
-    double *cs = &coef[interp_i * length];
 
     int l = quintic_find_span(xs, length, xs[i]);
     double ders[QUINTIC_DEG + 1][QUINTIC_DEG + 1];
@@ -776,7 +792,9 @@ void extract_quintic_coeffs(int i, int length, int interp_i, int ninterps,
     double s1 = 0.0, s2 = 0.0, s3 = 0.0, s4 = 0.0, s5 = 0.0;
     for (int jj = 0; jj <= QUINTIC_DEG; ++jj)
     {
-        double cc = cs[l - QUINTIC_DEG + jj];
+        // coef (= solved B, interp_i-innermost). Outputs c1..c5 below keep their
+        // interp_i*length+i layout.
+        double cc = QRHS(coef, l - QUINTIC_DEG + jj, interp_i, ninterps);
         s1 += cc * ders[1][jj];
         s2 += cc * ders[2][jj];
         s3 += cc * ders[3][jj];
@@ -833,10 +851,10 @@ void solve_quintic_band_batch(double *W, double *B, int ninterps, int length)
 #endif
     for (int interp_i = start; interp_i < ninterps; interp_i += diff)
     {
-        double *ws = &W[(size_t)interp_i * QUINTIC_BAND_ROWS * length];
-        double *b = &B[interp_i * length];
-        int info = quintic_banfac(ws, length);
-        if (info == 0) quintic_banslv(ws, length, b);
+        // interp_i-innermost layout -> consecutive threads (interp_i, interp_i+1,
+        // ...) read consecutive addresses: the memory-bound solve coalesces.
+        int info = quintic_banfac(W, interp_i, ninterps, length);
+        if (info == 0) quintic_banslv(W, B, interp_i, ninterps, length);
     }
 }
 

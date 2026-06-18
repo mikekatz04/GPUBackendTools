@@ -872,234 +872,268 @@ void band_gather(double *dst, double *W, int interp_i, int ninterps,
 }
 
 // Add v to reduced-system band entry A_red[i,k] (contiguous, half-band Mred).
-static inline void red_add(double *wr, int Mred, int R, int i, int k, double v)
+static CUDA_DEVICE void red_add(double *wr, int Mred, int R, int i, int k, double v)
 {
     wr[(size_t)(Mred + (i - k)) * R + k] += v;
 }
 
-static inline bool darr_eq(const double *a, const double *b, size_t k)
-{ for (size_t i = 0; i < k; ++i) if (a[i] != b[i]) return false; return true; }
-static inline void darr_cpy(double *d, const double *s, size_t k)
-{ for (size_t i = 0; i < k; ++i) d[i] = s[i]; }
+// ===========================================================================
+// Unified chunked SPIKE solve shared by the CPU mirror (serial loops) and the
+// GPU kernels (block per (system, chunk), chunk band in shared memory). The
+// per-chunk math lives in three CUDA_DEVICE helpers compiled by BOTH g++ and
+// nvcc; only the driver differs -- quintic_spike_batched (CPU, this file) walks
+// (system, chunk) serially with a heap chunk buffer, while quintic_spike_solve_gpu
+// (the __CUDACC__ block) launches the same helpers as kernels with the chunk band
+// in dynamic __shared__ memory. This is the "CPU mirrors GPU exactly"
+// verification vehicle: because the CPU runs the identical helpers + recursion,
+// the scipy parity tests validate the parallel algorithm itself.
+//
+// Per-system scratch (contiguous, packed by GLOBAL row -- no per-chunk Cmax
+// over-allocation):
+//   g[row]        local solutions g_j = D_j^{-1} f_j          (length n)
+//   V[b*n + row]  right spikes, column-contiguous              (m*n)
+//   W[b*n + row]  left  spikes, column-contiguous              (m*n)
+//   wr / rr       reduced band (half-band Mred=3m) / rhs       ((2Mred+1)R / R)
+// Interleaved reduced positions (closed form): pos_t(j)=(2j-1)m (j>=1);
+// pos_b(j)=(j==0)?0:2jm (j<=P-2); R = 2(P-1)m.
+// ===========================================================================
+static CUDA_DEVICE int qsp_pos_t(int j, int m) { return (2 * j - 1) * m; }
+static CUDA_DEVICE int qsp_pos_b(int j, int m) { return (j == 0) ? 0 : (2 * j * m); }
 
-// Solve ONE banded system: contiguous band cb[br*n + col] (half-band m), rhs rb
-// (length n) overwritten with the solution. SPIKE partition into chunks of C
-// rows (>= 2m); reduced system assembled in interleaved physical order and
-// solved directly with the same banded primitives (Task 3 adds recursion).
-// Mirrors the validated NumPy reference (matches np.linalg.solve to ~1e-16).
-// uniform != 0 enables the Toeplitz factorization cache for interior chunks.
-void spike_solve_one(double *cb, double *rb, int n, int m, int C, int uniform)
+// Chunk size (host, both builds). Defaults to QSPIKE_DEFAULT_C, clamped to >= 2m
+// (the spike structure needs >= 2m rows/chunk). Independent of length -- the
+// "fixed-size buffers for long signals" property. C is NOT shrunk to fit shared
+// memory as m grows down the recursion (that would collapse the reduced-system
+// shrink ratio); instead the GPU factor kernel decides shared-vs-global per launch
+// from whether (2m+1)*nj_max fits the smem budget.
+#define QSPIKE_DEFAULT_C 1024
+static inline int qspike_chunk_size(int m, int req)
 {
+    int C = (req > 0) ? req : QSPIKE_DEFAULT_C;
     if (C < 2 * m) C = 2 * m;
-    int P = n / C;
+    return C;
+}
+
+// Number of chunks for order n, chunk size C, half-band m. Ceil chunking; if the
+// tail chunk would be shorter than 2m (too small for both interface tips) it is
+// merged into the previous chunk. Guarantees every chunk has >= 2m rows and the
+// largest chunk has < C + 2m rows (bounds the shared-memory band). Chunk j spans
+// rows [j*C, (j<P-1)?(j+1)*C : n).
+static inline int qspike_num_chunks(int n, int C, int m)
+{
+    int P = (n + C - 1) / C;
     if (P < 1) P = 1;
-    if (P == 1)                                   // single chunk: direct banded solve
+    if (P > 1 && (n - (P - 1) * C) < 2 * m) --P;   // merge short tail
+    return P;
+}
+
+// --- Per-chunk device helpers (shared by the CPU mirror and the GPU kernels) ---
+
+// Factor chunk j (rows [s, s+nj)) of contiguous band cb[br*n+col] (half-band m,
+// order n) into the caller's band buffer sD[br*nj+col] (dynamic __shared__ on the
+// GPU, heap on the CPU). Solves the local rhs g[s..) = D_j^{-1} f_j and the chunk's
+// right/left interface spikes into V/W (column-contiguous, packed by global row).
+static CUDA_DEVICE
+void qspike_factor_chunk(const double *cb, int n, int m, int s, int nj, int j, int P,
+                         double *sD, const double *rb, double *g, double *V, double *W)
+{
+    int e = s + nj;
+    for (int br = 0; br <= 2 * m; ++br)                 // copy chunk band; zero coupling rows
+        for (int c = 0; c < nj; ++c)
+        {
+            int row = (s + c) + (br - m);
+            sD[br * nj + c] = (row >= s && row < e) ? cb[(size_t)br * n + (s + c)] : 0.0;
+        }
+    banfac_local(sD, m, nj);
+
+    for (int c = 0; c < nj; ++c) g[s + c] = rb[s + c];  // local solution g_j
+    banslv_local(sD, m, nj, &g[s]);
+
+    if (j < P - 1)                                      // right spike: bottom m rows = Sup_j
+        for (int b = 0; b < m; ++b)
+        {
+            double *col = &V[(size_t)b * n + s];        // column-contiguous -> solve in place
+            for (int c = 0; c < nj; ++c) col[c] = 0.0;
+            for (int a = b; a < m; ++a) col[nj - m + a] = cb[(size_t)(a - b) * n + (e + b)];
+            banslv_local(sD, m, nj, col);
+        }
+    if (j > 0)                                          // left spike: top m rows = Sub_j
+        for (int b = 0; b < m; ++b)
+        {
+            double *col = &W[(size_t)b * n + s];
+            for (int c = 0; c < nj; ++c) col[c] = 0.0;
+            for (int a = 0; a <= b; ++a) col[a] = cb[(size_t)(2 * m + a - b) * n + (s - m + b)];
+            banslv_local(sD, m, nj, col);
+        }
+}
+
+// Assemble chunk j's rows of the reduced band wr (half-band Mred, order R) + rhs rr
+// from its own spike tips. Each chunk owns reduced rows pos_t(j)/pos_b(j) -> the
+// chunks write disjoint rows (no races). wr must be pre-zeroed.
+static CUDA_DEVICE
+void qspike_assemble_reduced_chunk(const double *g, const double *V, const double *W,
+                                   double *wr, double *rr, int n, int m, int R, int Mred,
+                                   int j, int P, int s, int nj)
+{
+    if (j >= 1)                                         // top equation, p = pos_t(j)
     {
-        banfac_local(cb, m, n);
-        banslv_local(cb, m, n, rb);
+        int p = qsp_pos_t(j, m);
+        for (int a = 0; a < m; ++a) { red_add(wr, Mred, R, p + a, p + a, 1.0); rr[p + a] = g[s + a]; }
+        if (j < P - 1)
+        {
+            int cp = qsp_pos_t(j + 1, m);
+            for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                red_add(wr, Mred, R, p + a, cp + b, V[(size_t)b * n + (s + a)]);
+        }
+        int cw = qsp_pos_b(j - 1, m);
+        for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+            red_add(wr, Mred, R, p + a, cw + b, W[(size_t)b * n + (s + a)]);
+    }
+    if (j < P - 1)                                      // bottom equation, p = pos_b(j)
+    {
+        int p = qsp_pos_b(j, m);
+        for (int a = 0; a < m; ++a) { red_add(wr, Mred, R, p + a, p + a, 1.0); rr[p + a] = g[s + nj - m + a]; }
+        int cv = qsp_pos_t(j + 1, m);
+        for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+            red_add(wr, Mred, R, p + a, cv + b, V[(size_t)b * n + (s + nj - m + a)]);
+        if (j >= 1)
+        {
+            int cw = qsp_pos_b(j - 1, m);
+            for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
+                red_add(wr, Mred, R, p + a, cw + b, W[(size_t)b * n + (s + nj - m + a)]);
+        }
+    }
+}
+
+// Back-substitute chunk j: x_j = g_j - V_j x_{j+1}^t - W_j x_{j-1}^b, written into
+// rb (the system rhs, overwritten with the solution), using the interface unknowns
+// rr from the reduced solve. No band access -> no shared memory needed here.
+static CUDA_DEVICE
+void qspike_backsub_chunk(double *rb, int n, int m, const double *g,
+                          const double *V, const double *W, const double *rr,
+                          int j, int P, int s, int nj)
+{
+    for (int c = 0; c < nj; ++c)
+    {
+        double x = g[s + c];
+        if (j < P - 1) { int cp = qsp_pos_t(j + 1, m); for (int b = 0; b < m; ++b) x -= V[(size_t)b * n + (s + c)] * rr[cp + b]; }
+        if (j > 0)     { int cp = qsp_pos_b(j - 1, m); for (int b = 0; b < m; ++b) x -= W[(size_t)b * n + (s + c)] * rr[cp + b]; }
+        rb[s + c] = x;
+    }
+}
+
+#ifndef __CUDACC__
+// ===========================================================================
+// CPU mirror of the GPU SPIKE launcher (host only -- the GPU build uses
+// quintic_spike_solve_gpu in the __CUDACC__ block). Solves nsys independent
+// banded systems (band cb[sys*(2m+1)*n + br*n + col], rhs rb[sys*n + col],
+// overwritten with the solution) by the chunked SPIKE method, recursing on the
+// reduced system. Runs the SAME per-chunk device helpers as the GPU kernels,
+// serially. nsys is constant across recursion levels (each system spawns exactly
+// one reduced system), so the recursion is a clean batched re-entry.
+// ===========================================================================
+void quintic_spike_batched(double *cb, double *rb, int nsys, int n, int m, int Creq)
+{
+    int C = qspike_chunk_size(m, Creq);
+    int P = qspike_num_chunks(n, C, m);
+    int bandrows = 2 * m + 1;
+
+    if (P == 1)                                         // single chunk: direct banded solve
+    {
+        for (int sys = 0; sys < nsys; ++sys)
+        {
+            double *A = &cb[(size_t)sys * bandrows * n];
+            banfac_local(A, m, n);
+            banslv_local(A, m, n, &rb[(size_t)sys * n]);
+        }
         return;
     }
 
-    double *g = new double[n];                    // g_j = D_j^{-1} f_j
-    double *Vs = new double[(size_t)n * m];       // right spikes, row-major [row*m + b]
-    double *Ws = new double[(size_t)n * m];       // left spikes
-
-    // Uniform fast path: cache one interior full-size chunk's factorization +
-    // spikes and reuse for any later interior chunk whose band matches exactly
-    // (Toeplitz). Element-wise compare => always correct (mismatches recompute,
-    // so non-uniform input simply never reuses).
-    int band_sz = (2 * m + 1) * C;
-    double *cDraw = nullptr, *cDfac = nullptr, *cV = nullptr, *cW = nullptr, *cSup = nullptr, *cSub = nullptr;
-    bool have_cache = false;
-    if (uniform)
-    {
-        cDraw = new double[band_sz]; cDfac = new double[band_sz];
-        cV = new double[(size_t)C * m]; cW = new double[(size_t)C * m];
-        cSup = new double[m * m]; cSub = new double[m * m];
-    }
-
-    for (int j = 0; j < P; ++j)
-    {
-        int s = j * C;
-        int e = (j < P - 1) ? (s + C) : n;
-        int nj = e - s;
-        bool interior = uniform && j > 0 && j < P - 1 && nj == C;
-
-        double *D = new double[(size_t)(2 * m + 1) * nj];   // chunk diagonal block (coupling rows zeroed)
-        for (int br = 0; br <= 2 * m; ++br)
-            for (int c = 0; c < nj; ++c)
-            {
-                int row = (s + c) + (br - m);
-                D[br * nj + c] = (row >= s && row < e) ? cb[br * n + (s + c)] : 0.0;
-            }
-
-        bool fill_cache = false;
-        if (interior)
-        {
-            double *sup = new double[m * m];
-            double *sub = new double[m * m];
-            for (int a = 0; a < m; ++a)
-                for (int b = 0; b < m; ++b)
-                {
-                    sup[a * m + b] = (b <= a) ? cb[(a - b) * n + (e + b)] : 0.0;
-                    sub[a * m + b] = (a <= b) ? cb[(2 * m + a - b) * n + (s - m + b)] : 0.0;
-                }
-            if (have_cache && darr_eq(D, cDraw, band_sz) &&
-                darr_eq(sup, cSup, (size_t)m * m) && darr_eq(sub, cSub, (size_t)m * m))
-            {
-                for (int c = 0; c < nj; ++c) g[s + c] = rb[s + c];
-                banslv_local(cDfac, m, nj, &g[s]);
-                for (int c = 0; c < nj; ++c)
-                    for (int b = 0; b < m; ++b)
-                    {
-                        Vs[(size_t)(s + c) * m + b] = cV[c * m + b];
-                        Ws[(size_t)(s + c) * m + b] = cW[c * m + b];
-                    }
-                delete[] sup; delete[] sub; delete[] D;
-                continue;
-            }
-            darr_cpy(cDraw, D, band_sz);
-            darr_cpy(cSup, sup, (size_t)m * m);
-            darr_cpy(cSub, sub, (size_t)m * m);
-            delete[] sup; delete[] sub;
-            fill_cache = true;
-        }
-
-        banfac_local(D, m, nj);
-
-        for (int c = 0; c < nj; ++c) g[s + c] = rb[s + c];
-        banslv_local(D, m, nj, &g[s]);
-
-        if (j < P - 1)                            // right spike: rhs bottom m rows = Sup_j (nonzero a>=b)
-            for (int b = 0; b < m; ++b)
-            {
-                double *col = new double[nj];
-                for (int c = 0; c < nj; ++c) col[c] = 0.0;
-                for (int a = b; a < m; ++a) col[nj - m + a] = cb[(a - b) * n + (e + b)];
-                banslv_local(D, m, nj, col);
-                for (int c = 0; c < nj; ++c) Vs[(size_t)(s + c) * m + b] = col[c];
-                delete[] col;
-            }
-        if (j > 0)                                // left spike: rhs top m rows = Sub_j (nonzero a<=b)
-            for (int b = 0; b < m; ++b)
-            {
-                double *col = new double[nj];
-                for (int c = 0; c < nj; ++c) col[c] = 0.0;
-                for (int a = 0; a <= b; ++a) col[a] = cb[(2 * m + a - b) * n + (s - m + b)];
-                banslv_local(D, m, nj, col);
-                for (int c = 0; c < nj; ++c) Ws[(size_t)(s + c) * m + b] = col[c];
-                delete[] col;
-            }
-
-        if (fill_cache)                           // remember this interior chunk for reuse
-        {
-            darr_cpy(cDfac, D, band_sz);
-            for (int c = 0; c < C; ++c)
-                for (int b = 0; b < m; ++b)
-                {
-                    cV[c * m + b] = Vs[(size_t)(s + c) * m + b];
-                    cW[c * m + b] = Ws[(size_t)(s + c) * m + b];
-                }
-            have_cache = true;
-        }
-        delete[] D;
-    }
-    if (uniform) { delete[] cDraw; delete[] cDfac; delete[] cV; delete[] cW; delete[] cSup; delete[] cSub; }
-
-    // Interleaved reduced unknowns: ("b",0),("t",1),("b",1),...,("t",P-1).
-    int *pos_t = new int[P];
-    int *pos_b = new int[P];
-    for (int j = 0; j < P; ++j) { pos_t[j] = -1; pos_b[j] = -1; }
-    int blk = 0;
-    for (int j = 0; j < P; ++j)
-    {
-        if (j > 0) { pos_t[j] = blk * m; ++blk; }
-        if (j < P - 1) { pos_b[j] = blk * m; ++blk; }
-    }
-    int R = blk * m;
     int Mred = 3 * m;
-    double *wr = new double[(size_t)(2 * Mred + 1) * R];
-    for (size_t t = 0; t < (size_t)(2 * Mred + 1) * R; ++t) wr[t] = 0.0;
-    double *rr = new double[R];
+    int R = 2 * (P - 1) * m;
+    int last = n - (P - 1) * C;                         // size of the final (largest) chunk
+    int nj_max = (last > C) ? last : C;                 // < C + 2m -> bounds the chunk band
 
-    for (int j = 0; j < P; ++j)
+    double *g  = new double[(size_t)nsys * n];
+    double *V  = new double[(size_t)nsys * m * n];
+    double *W  = new double[(size_t)nsys * m * n];
+    double *wr = new double[(size_t)nsys * (2 * Mred + 1) * R]();   // zero-initialized
+    double *rr = new double[(size_t)nsys * R];
+    double *sD = new double[(size_t)bandrows * nj_max];            // chunk band scratch (mirrors GPU __shared__)
+
+    for (int sys = 0; sys < nsys; ++sys)                // phase 1: factor + assemble reduced
     {
-        int s = j * C;
-        int e = (j < P - 1) ? (s + C) : n;
-        int nj = e - s;
-        if (pos_t[j] >= 0)                        // top equation: x_j^t + V_j^t x_{j+1}^t + W_j^t x_{j-1}^b = g_j^t
+        double *cbs = &cb[(size_t)sys * bandrows * n];
+        double *rbs = &rb[(size_t)sys * n];
+        double *gs  = &g[(size_t)sys * n];
+        double *Vs  = &V[(size_t)sys * m * n];
+        double *Ws  = &W[(size_t)sys * m * n];
+        double *wrs = &wr[(size_t)sys * (2 * Mred + 1) * R];
+        double *rrs = &rr[(size_t)sys * R];
+        for (int j = 0; j < P; ++j)
         {
-            int p = pos_t[j];
-            for (int a = 0; a < m; ++a) { red_add(wr, Mred, R, p + a, p + a, 1.0); rr[p + a] = g[s + a]; }
-            if (j < P - 1 && pos_t[j + 1] >= 0)
-                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
-                    red_add(wr, Mred, R, p + a, pos_t[j + 1] + b, Vs[(size_t)(s + a) * m + b]);
-            if (j > 0 && pos_b[j - 1] >= 0)
-                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
-                    red_add(wr, Mred, R, p + a, pos_b[j - 1] + b, Ws[(size_t)(s + a) * m + b]);
-        }
-        if (pos_b[j] >= 0)                        // bottom equation: x_j^b + V_j^b x_{j+1}^t + W_j^b x_{j-1}^b = g_j^b
-        {
-            int p = pos_b[j];
-            for (int a = 0; a < m; ++a) { red_add(wr, Mred, R, p + a, p + a, 1.0); rr[p + a] = g[s + nj - m + a]; }
-            if (j < P - 1 && pos_t[j + 1] >= 0)
-                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
-                    red_add(wr, Mred, R, p + a, pos_t[j + 1] + b, Vs[(size_t)(s + nj - m + a) * m + b]);
-            if (j > 0 && pos_b[j - 1] >= 0)
-                for (int a = 0; a < m; ++a) for (int b = 0; b < m; ++b)
-                    red_add(wr, Mred, R, p + a, pos_b[j - 1] + b, Ws[(size_t)(s + nj - m + a) * m + b]);
+            int s = j * C;
+            int e = (j < P - 1) ? (s + C) : n;
+            int nj = e - s;
+            qspike_factor_chunk(cbs, n, m, s, nj, j, P, sD, rbs, gs, Vs, Ws);
+            qspike_assemble_reduced_chunk(gs, Vs, Ws, wrs, rrs, n, m, R, Mred, j, P, s, nj);
         }
     }
 
-    // Solve the reduced system. It is itself banded (half-band Mred), so recurse
-    // when that makes real progress (order at least halves); otherwise solve it
-    // directly. (At C=2m the reduced order ~= n, so recursion would not shrink.)
-    if (R > C && 2 * R <= n)
-        spike_solve_one(wr, rr, R, Mred, C, 0);   // reduced system is not Toeplitz
+    if (R > C && 2 * R <= n)                            // phase 2: reduced solve (recurse if it shrinks)
+        quintic_spike_batched(wr, rr, nsys, R, Mred, Creq);
     else
-    {
-        banfac_local(wr, Mred, R);
-        banslv_local(wr, Mred, R, rr);            // rr now holds the interface tips
-    }
-
-    for (int j = 0; j < P; ++j)                   // x_j = g_j - V_j x_{j+1}^t - W_j x_{j-1}^b
-    {
-        int s = j * C;
-        int e = (j < P - 1) ? (s + C) : n;
-        int nj = e - s;
-        for (int c = 0; c < nj; ++c)
+        for (int sys = 0; sys < nsys; ++sys)
         {
-            double x = g[s + c];
-            if (j < P - 1 && pos_t[j + 1] >= 0)
-                for (int b = 0; b < m; ++b) x -= Vs[(size_t)(s + c) * m + b] * rr[pos_t[j + 1] + b];
-            if (j > 0 && pos_b[j - 1] >= 0)
-                for (int b = 0; b < m; ++b) x -= Ws[(size_t)(s + c) * m + b] * rr[pos_b[j - 1] + b];
-            rb[s + c] = x;
+            banfac_local(&wr[(size_t)sys * (2 * Mred + 1) * R], Mred, R);
+            banslv_local(&wr[(size_t)sys * (2 * Mred + 1) * R], Mred, R, &rr[(size_t)sys * R]);
+        }
+
+    for (int sys = 0; sys < nsys; ++sys)                // phase 3: back-substitute
+    {
+        double *rbs = &rb[(size_t)sys * n];
+        double *gs  = &g[(size_t)sys * n];
+        double *Vs  = &V[(size_t)sys * m * n];
+        double *Ws  = &W[(size_t)sys * m * n];
+        double *rrs = &rr[(size_t)sys * R];
+        for (int j = 0; j < P; ++j)
+        {
+            int s = j * C;
+            int e = (j < P - 1) ? (s + C) : n;
+            int nj = e - s;
+            qspike_backsub_chunk(rbs, n, m, gs, Vs, Ws, rrs, j, P, s, nj);
         }
     }
 
-    delete[] g; delete[] Vs; delete[] Ws;
-    delete[] pos_t; delete[] pos_b; delete[] wr; delete[] rr;
+    delete[] g; delete[] V; delete[] W; delete[] wr; delete[] rr; delete[] sD;
 }
 
-// Solve all splines: gather each spline's band (QBAND W) + rhs (QRHS B) into
-// contiguous buffers, SPIKE-solve, write the solution back into B. chunk<=0 =>
-// single chunk (CPU auto; the GPU shared-memory budget is set in Task 5).
+// Solve all splines: gather each spline's band (QBAND W) + rhs (QRHS B) into a
+// contiguous batched buffer, run the SPIKE mirror, scatter the solution back into
+// B. chunk<=0 keeps the legacy CPU behaviour (single direct banded solve per
+// spline); a positive chunk forces the chunked/recursive path (exercised by the
+// tests). The GPU path defaults chunk to QSPIKE_DEFAULT_C to saturate the device.
 void quintic_spike_solve(double *W, double *B, int ninterps, int length, int chunk, int uniform)
 {
+    (void)uniform;   // uniform Toeplitz caching is a follow-up; not on the mirrored path
     int m = QUINTIC_HALF_BAND;
-    int C = (chunk > 0) ? chunk : length;
+    int bandrows = QUINTIC_BAND_ROWS;
+    int Creq = (chunk > 0) ? chunk : length;            // CPU default: one chunk (P==1)
+
+    double *cb = new double[(size_t)ninterps * bandrows * length];
+    double *rb = new double[(size_t)ninterps * length];
     for (int s = 0; s < ninterps; ++s)
     {
-        double *cb = new double[(size_t)QUINTIC_BAND_ROWS * length];
-        band_gather(cb, W, s, ninterps, length, 0, length);
-        double *rb = new double[length];
-        for (int c = 0; c < length; ++c) rb[c] = QRHS(B, c, s, ninterps);
-        spike_solve_one(cb, rb, length, m, C, uniform);
-        for (int c = 0; c < length; ++c) QRHS(B, c, s, ninterps) = rb[c];
-        delete[] cb; delete[] rb;
+        band_gather(&cb[(size_t)s * bandrows * length], W, s, ninterps, length, 0, length);
+        double *rbs = &rb[(size_t)s * length];
+        for (int c = 0; c < length; ++c) rbs[c] = QRHS(B, c, s, ninterps);
     }
+    quintic_spike_batched(cb, rb, ninterps, length, m, Creq);
+    for (int s = 0; s < ninterps; ++s)
+        for (int c = 0; c < length; ++c) QRHS(B, c, s, ninterps) = rb[(size_t)s * length + c];
+    delete[] cb; delete[] rb;
 }
+#endif // !__CUDACC__
 
 // --- Kernels (block per spline over rows; mirror fill_B / set_spline_constants) ---
 CUDA_KERNEL

@@ -78,5 +78,34 @@ class SpikeSolveTest(unittest.TestCase):
         self._check(n=512, ninterps=1, kind="uniform", chunk=32)
 
 
+class SpikeDeepRecursionTest(SpikeSolveTest):
+    """GPU follow-up coverage: the production GPU path chunks a long spline at
+    C~1024 and recurses on the (still huge) reduced system -> two+ recursion
+    levels. The CPU mirror runs the *same* device helpers + host recursion, so
+    these scipy-parity checks at representative depth/batch validate the GPU
+    two-level-recursion algorithm. chunk=64, n=3000 forces L0->L1->L2 (two
+    recursions); chunk=64 keeps C >> 2m at L0/L1 so the reduced order shrinks.
+    """
+
+    def test_deep_recursion_uniform(self):
+        self._check(n=3000, ninterps=1, kind="uniform", chunk=64)
+
+    def test_deep_recursion_nonuniform(self):
+        self._check(n=3000, ninterps=1, kind="random", chunk=64)
+
+    def test_deep_recursion_log(self):
+        self._check(n=3000, ninterps=1, kind="log", chunk=64)
+
+    def test_deep_recursion_batch(self):
+        # batched recursion: nsys stays constant across recursion levels
+        self._check(n=2000, ninterps=3, kind="uniform", chunk=64)
+        self._check(n=2000, ninterps=3, kind="random", chunk=64)
+
+    def test_ragged_last_chunk(self):
+        # n not a multiple of chunk -> short tail merged into the previous chunk
+        for n in (1300, 1517, 2049):
+            self._check(n=n, ninterps=1, kind="random", chunk=64)
+
+
 if __name__ == "__main__":
     unittest.main()

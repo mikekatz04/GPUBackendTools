@@ -87,7 +87,7 @@ def plot_overlay_behavior(path):
         (
             r"$e^{-x}\sin(5x)$",
             lambda x: np.exp(-x) * np.sin(5.0 * x),
-            np.linspace(0.0, 3.0, 10),
+            np.linspace(0.0, 3.0, 15),
         ),
     ]
 

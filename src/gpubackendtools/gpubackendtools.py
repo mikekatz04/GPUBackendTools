@@ -1,6 +1,7 @@
 from __future__ import annotations
 import dataclasses
 import enum
+import pickle
 import types
 import typing
 import abc
@@ -65,6 +66,36 @@ class BackendMethods:
     xp: types.ModuleType
 
 
+def _resolve_backend_for_unpickle(backend_name: str) -> "Backend":
+    """Registry lookup executed by ``pickle.loads()`` for a pickled Backend.
+
+    :meth:`Backend.__reduce__` stores ``(this function, (<registry name>,))``
+    in the pickle stream instead of the Backend's state, so unpickling
+    re-resolves the name through the global BackendsManager rather than
+    reconstructing an instance (a Backend is a process-wide singleton, never
+    a value — see the ``__reduce__`` comment). Must stay module-level: pickle
+    records it by qualified name.
+
+    Backends register when their owning package is imported (``gbt_*`` at
+    ``gpubackendtools`` import, ``lisatools_*`` at ``lisatools`` import, ...).
+    When unpickling in a fresh process the owning package may not have been
+    imported yet; the registry-name prefix doubles as the import name for
+    every downstream package, so try importing it before giving up.
+    """
+    from .globals import get_backend
+
+    try:
+        return get_backend(backend_name)
+    except ValueError:
+        import importlib
+
+        try:
+            importlib.import_module(backend_name.split("_")[0])
+        except ImportError:
+            raise  # surface the original unknown-backend error context
+        return get_backend(backend_name)
+
+
 class Backend:
     """Abstract definition of a backend"""
 
@@ -115,6 +146,38 @@ class Backend:
         # Same rationale as __deepcopy__: Backend is a process-wide
         # singleton, never a value to clone.
         return self
+
+    def __reduce__(self):
+        # Same singleton rationale as __deepcopy__/__copy__, but for PICKLE,
+        # which ignores those two hooks entirely: by default pickle walks
+        # __dict__ and dies on the module reference in self.xp with
+        # "TypeError: cannot pickle 'module' object" — the failure any object
+        # graph that transitively holds a Backend used to hit (settings trees
+        # sent over MPI, multiprocessing workers, cached states, ...).
+        #
+        # __reduce__ replaces that default with a reconstruction recipe
+        # `(callable, args)`: the pickle stream stores ONLY the registry name,
+        # and pickle.loads() runs
+        # `_resolve_backend_for_unpickle(<registry name>)` to look the Backend
+        # up in the global BackendsManager. A Backend is never serialized as a
+        # value, only as a name to re-resolve:
+        #   * same process: loads(dumps(b)) is b — the identical singleton;
+        #   * fresh process: loads() reconnects to THAT process's registered
+        #     backend (importing the owning package first if needed).
+        #
+        # NB: self.backend_name is the plugin-MODULE name
+        # ("lisatools_backend_cpu"), not the registry key ("lisatools_cpu"),
+        # so the key is recovered by identity scan over the registry.
+        from .globals import Globals
+
+        registry = Globals().backends_manager._registry
+        for name, status in registry.items():
+            if isinstance(status, BackendStatusLoaded) and status.instance is self:
+                return (_resolve_backend_for_unpickle, (name,))
+        raise pickle.PicklingError(
+            f"Backend {type(self).__name__} is not registered in the global "
+            "BackendsManager; only registry-managed backends can be pickled."
+        )
 
     @staticmethod
     def _check_module_installed(backend_name: str, module_name: str):

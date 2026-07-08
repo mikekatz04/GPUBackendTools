@@ -165,19 +165,19 @@ class Backend:
         #   * fresh process: loads() reconnects to THAT process's registered
         #     backend (importing the owning package first if needed).
         #
-        # NB: self.backend_name is the plugin-MODULE name
-        # ("lisatools_backend_cpu"), not the registry key ("lisatools_cpu"),
-        # so the key is recovered by identity scan over the registry.
-        from .globals import Globals
-
-        registry = Globals().backends_manager._registry
-        for name, status in registry.items():
-            if isinstance(status, BackendStatusLoaded) and status.instance is self:
-                return (_resolve_backend_for_unpickle, (name,))
-        raise pickle.PicklingError(
-            f"Backend {type(self).__name__} is not registered in the global "
-            "BackendsManager; only registry-managed backends can be pickled."
-        )
+        # NB: the registry key is self.name (the same contract
+        # ParallelModuleBase relies on: get_backend(backend.name) returns
+        # this instance) — NOT self.backend_name, which holds the
+        # plugin-MODULE name ("lisatools_backend_cpu" vs registry key
+        # "lisatools_cpu").
+        try:
+            name = self.name
+        except ValueError:
+            raise pickle.PicklingError(
+                f"Backend {type(self).__name__} has no registry name (_name "
+                "unset); only registry-managed backends can be pickled."
+            )
+        return (_resolve_backend_for_unpickle, (name,))
 
     @staticmethod
     def _check_module_installed(backend_name: str, module_name: str):

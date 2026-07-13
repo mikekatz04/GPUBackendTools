@@ -55,26 +55,26 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
     This class has GPU capability.
 
     Args:
-        x (xp.ndarray): f values as input for the spline. Can be 1D flattend array
-            of total length
-            ``(num_bin_all * length)`` or 2D array with shape: ``(num_bin_all, length)``.
-        y_all (xp.ndarray): y values for the spline. This can be a 1D flattened
-            array with length
-            ``(num_interp_params * num_bin_all * num_modes * length)``
-            or 4D arrays of shape: ``(num_interp_params, num_bin_all, num_modes, length)``.
-        num_interp_params (int, optional): If ``x`` and ``y_all`` are flattened,
-            the user must provide the number of interpolation parameters.
-            (Default: ``None``)
-        num_bin_all (int, optional): If ``x`` and ``y_all`` are flattened,
-            the user must provide the number of total binaries.
-            (Default: ``None``)
-        num_modes (int, optional): If ``x`` and ``y_all`` are flattened,
-            the user must provide the number of modes.
-            (Default: ``None``)
-        length (int, optional): If ``x`` and ``y_all`` are flattened,
-            the user must provide the length of the frequency array for each binary.
-            (Default: ``None``)
-        force_backend (str, optional): ``"cpu"'', ``"gpu"'', ``"cuda"'', ``"cuda12x"'', or ``"cuda11x"''.
+        x (xp.ndarray): Independent-variable values for the splines. Either a
+            1D flattened array of total length ``(ninterps * length)`` or an
+            N-D array whose **last** axis is the per-spline ``length`` and whose
+            leading axes enumerate the independent splines (so
+            ``ninterps = prod(x.shape[:-1])``).
+        y_all (xp.ndarray): Dependent-variable values, **the same shape as**
+            ``x``.
+        ninterps (int, optional): Number of independent splines. Required only
+            when ``x`` / ``y_all`` are passed flattened (1D); otherwise it is
+            inferred from ``x.shape[:-1]``. (Default: ``None``)
+        length (int, optional): Number of points per spline. Required only when
+            ``x`` / ``y_all`` are passed flattened (1D); otherwise it is
+            ``x.shape[-1]``. (Default: ``None``)
+        spline_type (int, optional): Spacing hint (linear / log10 / general).
+            The spacing type is auto-detected from ``x`` and this argument is
+            overridden, so it does not normally need to be set. (Default:
+            ``None``)
+        force_backend (str, optional): ``"cpu"``, ``"gpu"``, ``"cuda"``,
+            ``"cuda12x"``, ``"cuda11x"``, or ``"jax"``. Chooses the compute
+            backend at construction. (Default: ``None`` -- first available.)
 
     Raises:
         ValueError: If input arguments are not correct.
@@ -295,7 +295,28 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         return self._cpp_class
     
     def __call__(self, x_new, ind_interps = None, use_c_backend=False, error_out_of_bounds = True, derivative=0):
-        
+        """Evaluate the fitted splines at new abscissae.
+
+        Args:
+            x_new (xp.ndarray): Query points. When ``ind_interps`` is ``None``,
+                its leading axes must match ``x.shape[:-1]`` (one query row per
+                spline); the last axis is the queries for that spline.
+            ind_interps (xp.ndarray, optional): Integer indices selecting which
+                splines to evaluate (must be unique). Required when ``x_new``
+                does not have one row per spline. (Default: ``None``.)
+            use_c_backend (bool, optional): Reserved; currently raises
+                ``NotImplementedError`` if ``True``. (Default: ``False``.)
+            error_out_of_bounds (bool, optional): If ``True``, raise when any
+                ``x_new`` falls outside the fitted range; if ``False``, clamp.
+                (Default: ``True``.)
+            derivative (int, optional): Derivative order to return (``0`` = the
+                interpolant itself, ``1`` = first derivative, ...). (Default:
+                ``0``.)
+
+        Returns:
+            xp.ndarray: Interpolated values with the shape of ``x_new``.
+        """
+
         if use_c_backend:
             raise NotImplementedError
         

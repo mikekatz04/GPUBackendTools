@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**LISA Analysis Tools–wide conventions:** [`../LISAanalysistools/docs/conventions.md`](../LISAanalysistools/docs/conventions.md) (canonical). **This repo's map:** [`docs/codebase-map.md`](docs/codebase-map.md).
+
 ## Project Overview
 
 `gpubackendtools` (imported as `gpubackendtools`) is the **backend dispatch framework** that downstream LISA/GW packages (e.g. `lisaanalysistools`, `fastemriwaveforms`) use to select between CPU (NumPy) and CUDA (CuPy) implementations of native code at runtime. It is itself a hybrid Python / C++ / CUDA project built with `scikit-build-core` and CMake. Python ≥ 3.10 is required.
@@ -72,7 +74,7 @@ A **backend** = `(xp, native_methods)` where `xp` is `numpy` or `cupy` and `nati
 
 To expose a new C++/CUDA function on the GBT backend:
 
-1. Implement it in `src/gpubackendtools/cutils/Interpolate.cu` (or a new `.cu`/`.hh` pair) and bind it in `gbt_binding.cxx` using pybind11.
+1. Implement it in `src/gpubackendtools/cutils/Interpolate.cu` (or a new `.cu`/`.hh` pair) and bind it in `gbt_binding.cxx` using nanobind.
 2. Add a field to `GBTBackendMethods` in `src/gpubackendtools/cutils/__init__.py`.
 3. Wire the field into `GBTBackend.__init__` and into each concrete `GBT{Cpu,Cuda11x,Cuda12x,Cuda13x}Backend.*_module_loader()` so it is loaded from the right plugin module.
 
@@ -91,11 +93,10 @@ User-facing classes inherit from `ParallelModuleBase` (`parallelbase.py`), which
 
 - `Interpolate.cu` / `Interpolate.hh` — heavy spline build/solve (LAPACKE tridiagonal on CPU, cuSPARSE on GPU, plus PCR launcher on GPU). The `.cu` is **copied to `Interpolate.cxx` at build time** and compiled by the C++ compiler for the CPU backend; the same `.cu` is compiled by `nvcc` for the GPU backend. **Code must be valid as both** — guard CUDA-only intrinsics with the macros in `gbt_global.h`.
 - **`InterpolateDevice.hh`** (Phase 1, 2026-06-02) — header-only `__device__` cubic-spline evaluators (`CubicSpline`, `CubicSplineSegment`, `get_window`, `binary_search`, `even_sampled_search`, `eval_single`, `eval`). Downstream `.cu` files `#include "InterpolateDevice.hh"` to evaluate splines without linking against `Interpolate.cu`. All method bodies that used to be out-of-line in `Interpolate.cu` are now inlined here.
-- `gbt_binding.cxx` / `gbt_binding.hpp` — pybind11 module exposing the C++/CUDA functions to Python (one shared binding source for both CPU and GPU builds; the produced extension is `gbt_backend_<flavor>.interp`).
-- `pybind11_cuda_array_interface.hpp` — pybind11 caster that lets functions accept CuPy arrays via `__cuda_array_interface__`.
-- `cuda_complex.hpp` — host/device-portable complex type. **Sprint-wide single copy**; LAT's local duplicate was deleted at Phase 2d.
+- `gbt_binding.cxx` / `gbt_binding.hpp` — **nanobind** module (`NB_MODULE`) exposing the C++/CUDA functions to Python (one shared binding source for both CPU and GPU builds; the produced extension is `gbt_backend_<flavor>.interp`). Migrated from pybind11 at Phase 3M (2026-06-04); the bespoke `pybind11_cuda_array_interface.hpp` CUDA-array caster was retired in the same migration — nanobind's `nb::ndarray<T, nb::device::cuda>` covers that case natively.
+- `cuda_complex.hpp` — host/device-portable complex type. **Single copy shared across LISA Analysis Tools**; LAT's local duplicate was deleted at Phase 2d.
 - **`GPUBackendToolsConfig.cmake`** (Phase 1) — forward-compat CMake config for downstream `find_package(GPUBackendTools CONFIG REQUIRED)` → `GPUBackendTools::headers` interface target.
-- `CubicSpline.cu`, `interp.pyx`, `interp.pxd`, `dev_ptr_issue.pyx` — legacy Cython artifacts. The active path is the pybind11 module produced from `gbt_binding.cxx`. Cython sources are excluded from wheels (`wheel.exclude` in `pyproject.toml`).
+- `CubicSpline.cu`, `interp.pyx`, `interp.pxd`, `dev_ptr_issue.pyx` — legacy Cython artifacts. The active path is the nanobind module produced from `gbt_binding.cxx`. Cython sources are excluded from wheels (`wheel.exclude` in `pyproject.toml`).
 - `cmake_functions.cmake` — `apply_cpu_backend_common_options` / `apply_gpu_backend_common_options` helpers and `get_lapacke()` LAPACKE detector.
 
 ## Downstream consumption (Phase 1)
@@ -114,12 +115,13 @@ headers via two equivalent mechanisms:
 - `interpolate.py` — `CubicSplineInterpolant`, the reference user-facing class wrapping the native `interpolate_wrap` / `CubicSplineWrap` / `CubicSpline` exposed via `GBTBackendMethods`.
 - `pointeradjust.py` — `wrapper(...)` and `pointer_adjust` decorator: convert NumPy/CuPy arrays and Cython-class objects to raw `size_t` pointers for legacy Cython entry points. Used by `interpolate.py`.
 - `cutils/__init__.py` — concrete `GBTCpuBackend` / `GBTCuda11xBackend` / `GBTCuda12xBackend` / `GBTCuda13xBackend` and the `GBTBackendMethods` dataclass.
+- `jax/` — a fourth, currently-undocumented backend: `GBTJaxBackend` (`_name = "gbt_jax"`, `backend.py`), pure-JAX spline fit/eval (`cubic_spline.py`). No compiled plugin module — gated on `import jax` only, subclasses `Backend` directly (skips the native-module-installed check). Selected the same way as the others: `force_backend="jax"` / `get_backend("gbt_jax")`.
 - `exceptions.py` — `GPUBACKENDTOOLSException` root and `BackendUnavailableException` / `MissingDependencies` / `MissingDriver` / `BackendAccessException` etc. (Note: `BackendUnavailableException` is also re-defined in `gpubackendtools.py` for historical reasons — prefer importing from `.exceptions`.)
 - `utils/` — `config.py` (Configuration / ConfigConsumer / `detect_cfg_file` for CLI/env/file-based config), `citation.py` / `citations.py` (pydantic-based citation metadata), `utility.py`.
 
 ## Key External Dependencies
 
-- `pybind11`, `cython`, `numpy`, `scikit-build-core` — build-time.
+- `nanobind` (pinned exactly, `==2.12.0` — a LISA Analysis Tools–wide constraint for cross-wheel type-sharing ABI compatibility), `cython`, `numpy`, `scikit-build-core` — build-time.
 - `nvidia-ml-py` (`pynvml`) — runtime CUDA driver-version detection in `_CudaBackend._get_cuda_version`.
 - `pydantic`, `jsonschema`, `pyyaml` — used by the file/registry/citations layer.
 - `cupy` is **not** declared in `dependencies` — it must be installed separately matching the chosen CUDA backend (`cupy-cuda12x` etc.). The CUDA backend constructors raise `MissingDependencies` listing the right `cupy-cudaXXx` and `nvidia-*-cuXX` pip packages when something is missing.
@@ -134,7 +136,7 @@ headers via two equivalent mechanisms:
 - `docs/doctrees/`, `src/gpubackendtools/_version.py` (auto-generated by `setuptools_scm`), and various untracked `.pyx` / `.pxd` are dev artifacts — leave them alone unless specifically asked.
 - Build with `pip` / `cmake` only — there is no Makefile-based workflow.
 
-## Backend implementation hierarchy (sprint-wide rule)
+## Backend implementation hierarchy (LISA Analysis Tools–wide rule)
 
 When implementing or modifying an algorithm that exists across multiple
 backends (GPU C++ / CPU C++ / JAX), follow this hierarchy:

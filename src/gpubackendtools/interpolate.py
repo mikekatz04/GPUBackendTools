@@ -140,8 +140,14 @@ class CubicSplineInterpolant(GBTParallelModuleBase):
         # get/store info
         self.degree = 3
 
-        # setup all arrays for interpolation
-        x_flat = self.xp.asarray(x)
+        # setup all arrays for interpolation -- coerce inputs onto THIS
+        # backend's xp so callers may pass numpy/cupy (or jax) interchangeably.
+        # The native interpolate_wrap requires arrays matching the backend
+        # device; previously self.x_flat/self.y_flat were stored UNCOERCED (the
+        # asarray result here was computed and then dropped), so numpy inputs to
+        # a CUDA backend hit a nanobind device mismatch.
+        x = self.xp.asarray(x)
+        y_all = self.xp.asarray(y_all)
         B_flat = self.xp.zeros((self.ninterps * self.length,))
         self.y_flat = y_all
         self.x_flat = x.copy() if hasattr(x, "copy") else x

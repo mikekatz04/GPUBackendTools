@@ -173,6 +173,14 @@ function(get_lapacke)
   # cmake-lint: disable=R0912,R0915
   message(CHECK_START "Locating LAPACKE")
 
+  # Normalize option values so lowercase/mixed-case (e.g. "on", "auto",
+  # "pkgconfig") work the same as the canonical uppercase forms advertised in
+  # the docs. All comparisons below are case-sensitive STREQUAL, so without
+  # this a value like GBT_LAPACKE_FETCH=on would silently match neither "ON"
+  # nor "AUTO" — disabling fetch AND failing to bypass pkgconfig.
+  string(TOUPPER "${GBT_LAPACKE_DETECT_WITH}" GBT_LAPACKE_DETECT_WITH)
+  string(TOUPPER "${GBT_LAPACKE_FETCH}" GBT_LAPACKE_FETCH)
+
   if (NOT ${GBT_LAPACKE_DETECT_WITH} AND NOT ${GBT_LAPACKE_FETCH})
     set(${GBT_LAPACKE_DETECT_WITH} "AUTO")
     set(${GBT_LAPACKE_FETCH} OFF)
